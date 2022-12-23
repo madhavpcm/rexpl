@@ -6,6 +6,7 @@
 
 %{
 	#include <stdio.h>
+	#include <stdlib.h>
 	int global_variable;
 %}
 
@@ -18,13 +19,20 @@ op [=|-|*|^|/|+]
 
 %%
 
-{number}  {printf(" number");}
+{number}  { atoi(yytext) % 2 == 0? printf("Even number detected of length %d", yyleng) : printf("Odd number detected of length %d",yyleng);}
 {op}      {printf(" operator");}
 
 %%
 
-int main()
+int main(int argc , char** argv)
 {
+	if( argc > 1 ){
+		FILE *fp = fopen(argv[1], "r");
+		if( fp != 0x0 ){
+			yyin = fp;
+		}
+	}
+	
     yylex();
     return 1;
 }
