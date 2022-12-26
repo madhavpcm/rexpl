@@ -1,7 +1,9 @@
 %%
-//.* "SINGLE_COMMENT"
+/\*[^*]*\*+(?:[^/*][^*]*\*+)*/ "MULTI_COMMENT"
+//.*// "SINGLE_COMMENT"
+[0-9]+[.][0-9]+ "FLOAT"
 [0-9]+ "INT"
-[a-z|A-Z]+ "WORD"
+\w+ "WORD"
 \+ "+"
 \* "*"
 / "/"

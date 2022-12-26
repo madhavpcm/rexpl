@@ -52,6 +52,7 @@ fn main() {
                 if rule == "INT" {
                     num_count = num_count + 1;
                 }
+                println!("**");
                 println!("{} {}", rule, &input[l.span().start()..l.span().end()])
             }
             Err(e) => {

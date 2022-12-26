@@ -1,5 +1,9 @@
 %start Expr
 %avoid_insert "INT"
+%avoid_insert "FLOAT"
+%avoid_insert "WORD"
+%avoid_insert "SINGLE_COMMENT"
+%avoid_insert "MULTI_COMMENT"
 
 %%
 Diver -> Result<u64, ()>:
@@ -23,7 +27,7 @@ Worm -> Result<u64, ()>:
 
 Factor -> Result<u64, ()>:
       '(' Expr ')' { $2 }
-    | 'INT'
+    | "INT"
       {
           let v = $1.map_err(|_| ())?;
           parse_int($lexer.span_str(v.span()))
@@ -41,3 +45,4 @@ fn parse_int(s: &str) -> Result<u64, ()> {
         }
     }
 }
+
