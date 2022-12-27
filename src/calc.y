@@ -4,6 +4,7 @@
 %avoid_insert "WORD"
 %avoid_insert "SINGLE_COMMENT"
 %avoid_insert "MULTI_COMMENT"
+%avoid_insert "SPEC"
 
 %%
 Diver -> Result<u64, ()>:
