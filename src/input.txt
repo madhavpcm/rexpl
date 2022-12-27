@@ -1,9 +1,1 @@
-123
-//127 3498234 0129387 1732//
-123
-abc
-/*a lakjfl jsl kfs wlekr
-asdfjl as32
-21314 /
-
-*/
+if ( sldfj >= jlk ) { s2 }

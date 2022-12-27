@@ -41,27 +41,30 @@ fn main() {
     // Now we create a lexer with the `lexer` method with which we can lex an
     // input.
     //
-    let mut num_count = 0;
 
     let input = &read_file(&args[1]);
 
-    for r in lexerdef.lexer(input).iter() {
-        match r {
+    let lexer_ = lexerdef.lexer(input);
+    for lexeme in lexer_.iter() {
+        match lexeme {
             Ok(l) => {
                 let rule = lexerdef.get_rule_by_id(l.tok_id()).name.as_ref().unwrap();
-                if rule == "INT" {
-                    num_count = num_count + 1;
-                }
-                println!("**");
-                println!("{} {}", rule, &input[l.span().start()..l.span().end()])
+                println!("{} {}", rule, &input[l.span().start()..l.span().end()]);
             }
             Err(e) => {
                 println!("{:?}", e);
                 continue;
             }
         }
+        let (res, errs) = calc_y::parse(&lexer_);
+        for e in errs {
+            println!("{}", e.pp(&lexer_, &calc_y::token_epp));
+        }
+        match res {
+            Some(Ok(r)) => println!("Result: {:?}", r),
+            _ => eprintln!("Unable to evaluate expression."),
+        }
     }
-    println!("Number of integers:: {}", num_count);
     // Pass the lexer to the parser and lex and parse the input.
     //let (res, errs) = calc_y::parse(&lexer);
 }

@@ -7,7 +7,7 @@
 	#include <stdio.h>
 	#include <stdlib.h>
 	int global_variable;
-	static int nCount,lbCount, sCount, wCount, cCount, fCount;
+	static nCount,lbCount, sCount, wCount, cCount, fCount;
 %}
 
 /*Auxiliary declarations end & Regular definitions start here*/

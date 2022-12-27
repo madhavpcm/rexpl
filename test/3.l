@@ -19,7 +19,6 @@ lbreak [\n]
 space [\b \b]
 spec [A][A-Z|a-z][A-Z|a-z]
 word [a-z|A-Z]+
-char [a-z|A-Z|0-9|\n|\b \b]+
 
 
 /*Declarations section ends here*/
