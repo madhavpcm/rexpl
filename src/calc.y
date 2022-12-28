@@ -5,7 +5,7 @@
 %avoid_insert "SINGLE_COMMENT"
 %avoid_insert "MULTI_COMMENT"
 %avoid_insert "SPEC"
-%avoid_insert "VAR"
+%token "VAR"
 %token "COND"
 %token "S"
 %token "{"
@@ -16,36 +16,11 @@
 %token "FI"
 
 %%
-Start -> Result<u64, ()>:
-	Statement { Ok(get_count().try_into().unwrap()) }
-	| Cond_Statement { $1 }
-	| Term { Ok(0) }
+Start -> Result<String , ()>:
+	Expr { $1 }
 	;
 
-If_Statement -> Result<u64, ()>:
-	 "IF" "(" Cond_Statement ")"  Statement  "FI"
-	{ 
-		$5
-	}
-	;
-
-Statement -> Result<u64, ()>:
-	"S" {  Ok(0) }
-	| If_Statement 
-	{ 
-		inc_count();
-		Ok(0)
-	}
-	;
-
-Cond_Statement -> Result<u64, ()>:
-	Term "COND" Term 
-	{
-		Ok(0)
-	}
-	;
-
-Term -> Result<String, ()>:
+Factor -> Result<String, ()>:
 	"VAR"
 	{
 		let v = $1.map_err(|_| ())?;
@@ -56,15 +31,118 @@ Term -> Result<String, ()>:
 		let v = $1.map_err(|_| ())?;
 		parse_string($lexer.span_str(v.span()))
 	}
-	| "IF"
+	| '(' Expr ')' 
 	{
-	 inc_count(); 
-		let v = $1.map_err(|_| ())?;
-		parse_string($lexer.span_str(v.span()))
+		$2
 	}
     ;
 	
+Expr -> Result<String, ()>:
+	Expr '+' Term 
+	{
+		match $1 {
+			Ok(expr) => {
+				match $3 {
+					Ok(term) => {
+						let mut res = String::from(expr).clone();
+						res.push_str(&term[..]);
+						res.push_str("+");
+						res.push_str(" ");
+						Ok(res)
+					}
+					Err(e) => {
+						Err(())
+					}
+				}
+			}
+			Err(e) => {
+				Err(())
+			}
+		}	
+	} 
+	| Expr '-' Term
+	{
+		match $1 {
+			Ok(expr) => {
+				match $3 {
+					Ok(term) => {
+						let mut res = String::from(expr).clone();
+						res.push_str(&term[..]);
+						res.push_str("-");
+						res.push_str(" ");
+						Ok(res)
+					}
+					Err(e) => {
+						Err(())
+					}
+				}
+			}
+			Err(e) => {
+				Err(())
+			}
+		}	
+		
+	}
+	| Term
+	{
+		$1
+	}
+	;
 
+Term -> Result<String, ()>:
+	Term '*' Factor
+	{
+		match $1 {
+			Ok(term) => {
+				match $3 {
+					Ok(factor) => {
+						let mut res = String::from(term).clone();
+						res.push_str(&factor[..]);
+						res.push_str("*");
+						res.push_str(" ");
+						Ok(res)
+					}
+					Err(e)=>{
+						Err(())
+					}
+				}
+			}
+			Err(e) => {
+				Err(())
+			}
+		}	
+
+	}
+	| Term '/' Factor
+	{
+		match $1 {
+			Ok(term) => {
+				match $3 {
+					Ok(factor) => {
+						let mut res = String::from(term).clone();
+						res.push_str(&factor[..]);
+						res.push_str("/");
+						res.push_str(" ");
+						Ok(res)
+					}
+					Err(e) => {
+						Err(())
+					}
+				}
+			}
+			Err(e) => {
+				Err(())
+			}
+		}	
+
+
+	}
+	|
+	Factor 
+	{
+		$1
+	}
+	;
 %%
 // Any functions here are in scope for all the grammar actions above.
 use lazy_static::lazy_static;
@@ -97,12 +175,6 @@ fn parse_int(s: &str) -> Result<u64, ()> {
 }
 
 fn parse_string(s: &str) -> Result<String, ()> {
-	match s.parse::<String>() {
-		Ok(val) => Ok(val),
-		Err(_) => {
-			eprintln!("{} cannot be represented as a String", s);
-			Err(())
-		}
-	}
+	Ok(s.to_owned() + " ")
 }
 

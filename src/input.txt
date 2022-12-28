@@ -1,7 +1,1 @@
-if ( sldfj >= jlk )  
-	if( sb > 34 )
-		if ( g > 6)
-			S2	
-		fi
-	fi
-fi
+5 + 6 / 7 * ( 5 - 3 ) - 31 * 14
