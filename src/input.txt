@@ -1,1 +1,5 @@
-if ( sldfj >= jlk ) { s2 }
+if ( sldfj >= jlk )  
+	if( sb > 34 )
+		S2	
+	fi
+fi

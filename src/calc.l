@@ -3,6 +3,7 @@
 //[^\n]* "SINGLE_COMMENT"
 
 if "IF"
+fi "FI"
 [sS][0-9]* "S"
 ==|<=|>=|!=|<|> "COND"
 

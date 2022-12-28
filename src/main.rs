@@ -56,14 +56,14 @@ fn main() {
                 continue;
             }
         }
-        let (res, errs) = calc_y::parse(&lexer_);
-        for e in errs {
-            println!("{}", e.pp(&lexer_, &calc_y::token_epp));
-        }
-        match res {
-            Some(Ok(r)) => println!("Result: {:?}", r),
-            _ => eprintln!("Unable to evaluate expression."),
-        }
+    }
+    let (res, errs) = calc_y::parse(&lexer_);
+    for e in errs {
+        println!("{}", e.pp(&lexer_, &calc_y::token_epp));
+    }
+    match res {
+        Some(Ok(r)) => println!("Result: {:?}", r),
+        _ => eprintln!("Unable to evaluate expression."),
     }
     // Pass the lexer to the parser and lex and parse the input.
     //let (res, errs) = calc_y::parse(&lexer);

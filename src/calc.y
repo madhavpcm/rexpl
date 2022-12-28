@@ -5,31 +5,34 @@
 %avoid_insert "SINGLE_COMMENT"
 %avoid_insert "MULTI_COMMENT"
 %avoid_insert "SPEC"
-%avoid_insert "IF"
-%avoid_insert "COND"
-%avoid_insert "S"
-%avoid_insert "{"
-%avoid_insert "}"
-%avoid_insert "("
-%avoid_insert ")"
+%token "COND"
+%token "S"
+%token "{"
+%token "}"
+%token "("
+%token ")"
+%token "IF"
+%token "FI"
 
 %%
 Start -> Result<u64, ()>:
-	If_Statement { Ok(0) }
-	| Cond_Statement { Ok(0) }
+	Statement { Ok(get_count().try_into().unwrap()) }
+	| Cond_Statement { $1 }
 	| Term { Ok(0) }
 	;
 
 If_Statement -> Result<u64, ()>:
-	"S" { Ok(get_count().try_into().unwrap()) }
-	| "IF" "(" Cond_Statement ")" "{" If_Statement "}" 
+	 "IF" "(" Cond_Statement ")"  Statement  "FI"
 	{ 
-		let v = $1.map_err(|_| ())?;
-		let is_valid = $lexer.span_str(v.span());
-		if is_valid == "if" {
-			println!("{}", is_valid);
-			inc_count(); 
-		}
+		$5
+	}
+	;
+
+Statement -> Result<u64, ()>:
+	"S" {  Ok(0) }
+	| If_Statement 
+	{ 
+		inc_count();
 		Ok(0)
 	}
 	;
@@ -52,7 +55,14 @@ Term -> Result<String, ()>:
 		let v = $1.map_err(|_| ())?;
 		parse_string($lexer.span_str(v.span()))
 	}
+	| "IF"
+	{
+	 inc_count(); 
+		let v = $1.map_err(|_| ())?;
+		parse_string($lexer.span_str(v.span()))
+	}
     ;
+	
 
 %%
 // Any functions here are in scope for all the grammar actions above.
