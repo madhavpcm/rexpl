@@ -1,5 +1,7 @@
 if ( sldfj >= jlk )  
 	if( sb > 34 )
-		S2	
+		if ( g > 6)
+			S2	
+		fi
 	fi
 fi

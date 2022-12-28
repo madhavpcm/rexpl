@@ -49,7 +49,10 @@ fn main() {
         match lexeme {
             Ok(l) => {
                 let rule = lexerdef.get_rule_by_id(l.tok_id()).name.as_ref().unwrap();
-                println!("{} {}", rule, &input[l.span().start()..l.span().end()]);
+                if rule == "VAR" {
+                    println!("{} {}", rule, &input[l.span().start()..l.span().end()]);
+                }
+                println!()
             }
             Err(e) => {
                 println!("{:?}", e);

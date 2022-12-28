@@ -5,6 +5,7 @@
 %avoid_insert "SINGLE_COMMENT"
 %avoid_insert "MULTI_COMMENT"
 %avoid_insert "SPEC"
+%avoid_insert "VAR"
 %token "COND"
 %token "S"
 %token "{"
@@ -45,7 +46,7 @@ Cond_Statement -> Result<u64, ()>:
 	;
 
 Term -> Result<String, ()>:
-	"WORD"
+	"VAR"
 	{
 		let v = $1.map_err(|_| ())?;
 		parse_string($lexer.span_str(v.span()))
