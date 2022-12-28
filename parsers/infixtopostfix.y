@@ -44,10 +44,10 @@ Expr -> Result<String, ()>:
 			Ok(expr) => {
 				match $3 {
 					Ok(term) => {
-						let mut res = String::from("+").clone();
-						res.push_str(" ");
-						res.push_str(&expr[..]);
+						let mut res = String::from(expr).clone();
 						res.push_str(&term[..]);
+						res.push_str("+");
+						res.push_str(" ");
 						Ok(res)
 					}
 					Err(e) => {
@@ -66,10 +66,10 @@ Expr -> Result<String, ()>:
 			Ok(expr) => {
 				match $3 {
 					Ok(term) => {
-						let mut res = String::from("-").clone();
-						res.push_str(" ");
-						res.push_str(&expr[..]);
+						let mut res = String::from(expr).clone();
 						res.push_str(&term[..]);
+						res.push_str("-");
+						res.push_str(" ");
 						Ok(res)
 					}
 					Err(e) => {
@@ -96,10 +96,10 @@ Term -> Result<String, ()>:
 			Ok(term) => {
 				match $3 {
 					Ok(factor) => {
-						let mut res = String::from("*").clone();
-						res.push_str(" ");
-						res.push_str(&term[..]);
+						let mut res = String::from(term).clone();
 						res.push_str(&factor[..]);
+						res.push_str("*");
+						res.push_str(" ");
 						Ok(res)
 					}
 					Err(e)=>{
@@ -119,10 +119,10 @@ Term -> Result<String, ()>:
 			Ok(term) => {
 				match $3 {
 					Ok(factor) => {
-						let mut res = String::from("*").clone();
-						res.push_str(" ");
-						res.push_str(&term[..]);
+						let mut res = String::from(term).clone();
 						res.push_str(&factor[..]);
+						res.push_str("/");
+						res.push_str(" ");
 						Ok(res)
 					}
 					Err(e) => {
