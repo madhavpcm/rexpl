@@ -1,3 +1,5 @@
+use calc_y::Node;
+use calc_y::Operator;
 use lrlex::{lrlex_mod, LexerDef};
 use lrpar::lrpar_mod;
 use lrpar::{Lexeme, Lexer};
@@ -17,10 +19,6 @@ lrlex_mod!("calc.l");
 // with a suffix of `_y`).
 lrpar_mod!("calc.y");
 
-fn print_type_of<T>(_: &T) {
-    println!("{}", std::any::type_name::<T>());
-}
-
 fn read_file(path: &str) -> String {
     let mut f = match File::open(path) {
         Ok(r) => r,
@@ -34,6 +32,19 @@ fn read_file(path: &str) -> String {
     s
 }
 
+fn evaluateAST(root: Node) -> i64 {
+    match root {
+        Node::INT(n) => n,
+        Node::BinaryExpr { op, lhs, rhs } => match op {
+            Operator::Plus => evaluateAST(*lhs) + evaluateAST(*rhs),
+            Operator::Minus => evaluateAST(*lhs) - evaluateAST(*rhs),
+            Operator::Star => evaluateAST(*lhs) * evaluateAST(*rhs),
+            Operator::Slash => evaluateAST(*lhs) / evaluateAST(*rhs),
+        },
+        Node::UnaryExpr { op, child } => todo!(),
+    }
+}
+
 fn main() {
     // Get the `LexerDef` for the `calc` language.
     let lexerdef = calc_l::lexerdef();
@@ -43,31 +54,16 @@ fn main() {
     //
 
     let input = &read_file(&args[1]);
-
+    println!("Input is {}", input);
+    let strf = calc_y::parse_string("g");
     let lexer_ = lexerdef.lexer(input);
-    for lexeme in lexer_.iter() {
-        match lexeme {
-            Ok(l) => {
-                let rule = lexerdef.get_rule_by_id(l.tok_id()).name.as_ref().unwrap();
-                if rule == "VAR" {
-                    println!("{} {}", rule, &input[l.span().start()..l.span().end()]);
-                }
-                println!()
-            }
-            Err(e) => {
-                println!("{:?}", e);
-                continue;
-            }
-        }
-    }
-    let (res, errs) = calc_y::parse(&lexer_);
+    let (expr_res, errs) = calc_y::parse(&lexer_);
     for e in errs {
         println!("{}", e.pp(&lexer_, &calc_y::token_epp));
     }
-    match res {
-        Some(Ok(r)) => println!("Result: {:?}", r),
-        _ => eprintln!("Unable to evaluate expression."),
+    if let Some(Ok(r)) = expr_res {
+        println!("Result is {}", evaluateAST(r));
     }
-    // Pass the lexer to the parser and lex and parse the input.
-    //let (res, errs) = calc_y::parse(&lexer);
+
+    return;
 }
