@@ -1,6 +1,6 @@
 use crate::parser_y::{Node, Operator};
 use std::fmt::Formatter;
-use std::io::{stderr, Read, Write};
+use std::io::Write;
 
 impl std::fmt::Display for Operator {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
@@ -12,46 +12,43 @@ impl std::fmt::Display for Operator {
         }
     }
 }
-pub fn prefixTree(root: &Node) {
+pub fn prefix_tree(root: &Node) {
     match root {
         Node::INT(n) => {
             print!("{} ", n);
-            std::io::stdout().flush();
+            std::io::stdout().flush().expect("flush err");
         }
         Node::BinaryExpr { op, lhs, rhs } => {
             print!("{} ", op);
-            std::io::stdout().flush();
-            prefixTree(lhs);
-            prefixTree(rhs);
+            std::io::stdout().flush().expect("flush err");
+            postfix_tree(lhs);
+            prefix_tree(rhs);
         }
-        Node::UnaryExpr { op, child } => todo!(),
     }
 }
-pub fn postfixTree(root: &Node) {
+pub fn postfix_tree(root: &Node) {
     match root {
         Node::INT(n) => {
             print!("{} ", n);
-            std::io::stdout().flush();
+            std::io::stdout().flush().expect("flush err");
         }
         Node::BinaryExpr { op, lhs, rhs } => {
-            postfixTree(lhs);
-            postfixTree(rhs);
+            postfix_tree(lhs);
+            postfix_tree(rhs);
             print!("{} ", op);
-            std::io::stdout().flush();
+            std::io::stdout().flush().expect("flush err");
         }
-        Node::UnaryExpr { op, child } => todo!(),
     }
 }
 
-pub fn evaluateAST(root: Node) -> i64 {
+pub fn evaluate_ast(root: Node) -> i64 {
     match root {
         Node::INT(n) => n,
         Node::BinaryExpr { op, lhs, rhs } => match op {
-            Operator::Plus => evaluateAST(*lhs) + evaluateAST(*rhs),
-            Operator::Minus => evaluateAST(*lhs) - evaluateAST(*rhs),
-            Operator::Star => evaluateAST(*lhs) * evaluateAST(*rhs),
-            Operator::Slash => evaluateAST(*lhs) / evaluateAST(*rhs),
+            Operator::Plus => evaluate_ast(*lhs) + evaluate_ast(*rhs),
+            Operator::Minus => evaluate_ast(*lhs) - evaluate_ast(*rhs),
+            Operator::Star => evaluate_ast(*lhs) * evaluate_ast(*rhs),
+            Operator::Slash => evaluate_ast(*lhs) / evaluate_ast(*rhs),
         },
-        Node::UnaryExpr { op, child } => todo!(),
     }
 }

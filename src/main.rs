@@ -1,7 +1,6 @@
 // Libraries
-use lrlex::{lrlex_mod, LexerDef};
-use lrpar::{lrpar_mod, Lexeme, Lexer};
-use parser_y::{Node, Operator};
+use lrlex::lrlex_mod;
+use lrpar::lrpar_mod;
 use std::{
     env,
     fs::File,
@@ -9,7 +8,10 @@ use std::{
     process,
 };
 
+use crate::exprtree::prefix_tree;
+
 //Modules
+mod codegen;
 mod exprtree;
 lrlex_mod!("lexer.l");
 lrpar_mod!("parser.y");
@@ -39,9 +41,7 @@ fn main() {
         println!("{}", e.pp(&lexer_, &parser_y::token_epp));
     }
     if let Some(Ok(r)) = expr_res {
-        exprtree::prefixTree(&r);
-        println!("");
-        exprtree::postfixTree(&r);
+        codegen::code_gen(&r);
     }
 
     return;

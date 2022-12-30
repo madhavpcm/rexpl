@@ -22,35 +22,35 @@ Start -> Result<Node, ()>:
 	Expr { $1 }
 	;
 Expr -> Result<Node,()>:
-	Expr '+' Expr 
+	'+' Expr Expr 
 	{
         Ok(Node::BinaryExpr{
             op : Operator::Plus,
-            lhs : Box::new($1?),
+            lhs : Box::new($2?),
             rhs : Box::new($3?),
         })
 	}
-	| Expr '-' Expr
+	| '-' Expr Expr
 	{
         Ok(Node::BinaryExpr{
             op : Operator::Minus,
-            lhs : Box::new($1?),
+            lhs : Box::new($2?),
             rhs : Box::new($3?),
         })
 	}
-	| Expr '*' Expr
+	| '*' Expr Expr
 	{
         Ok(Node::BinaryExpr{
             op : Operator::Star,
-            lhs : Box::new($1?),
+            lhs : Box::new($2?),
             rhs : Box::new($3?),
         })
 	}
-	| Expr '/' Expr
+	| '/' Expr Expr
 	{
         Ok(Node::BinaryExpr{
             op : Operator::Slash,
-            lhs : Box::new($1?),
+            lhs : Box::new($2?),
             rhs : Box::new($3?),
         })
 	}

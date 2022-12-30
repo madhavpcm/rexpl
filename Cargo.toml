@@ -16,3 +16,5 @@ cfgrammar = "0.12"
 lrlex = "0.12"
 lrpar = "0.12"
 lazy_static = "1.4.0"
+tokio = { version = "1.1", features=["full"] }
+
