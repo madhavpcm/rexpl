@@ -4,14 +4,17 @@
 
 if "IF"
 fi "FI"
-[sS][0-9]* "S"
+begin "BEGIN"
+end "END"
+read "READ"
+write "WRITE"
+
 ==|<=|>=|!=|<|> "COND"
 
-[A-Za-z][a-zA-Z0-9]* "VAR"
-[A][a-z|A-Z][a-z|A-Z] "SPEC"
+[a-z] "VAR"
 [0-9]+[.][0-9]+ "FLOAT"
 [0-9]+ "INT"
-\w+ "WORD"
+= "="
 \+ "+"
 \* "*"
 / "/"
@@ -20,5 +23,6 @@ fi "FI"
 \) ")"
 \{ "{"
 \} "}"
+; ";"
 [\t\n ]+ ;
 

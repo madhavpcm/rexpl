@@ -8,8 +8,6 @@ use std::{
     process,
 };
 
-use crate::exprtree::prefix_tree;
-
 //Modules
 mod codegen;
 mod exprtree;

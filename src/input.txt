@@ -1,1 +1,6 @@
-3 + 99*5 - 8 * 7 - (9 * 100 / ( 7 + 3))
+begin
+	read(a);
+	read(b);
+	c = a + 2*b;
+	write(c);
+end;

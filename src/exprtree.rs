@@ -1,54 +1,58 @@
-use crate::parser_y::{Node, Operator};
+use crate::parser_y::{ASTNode, ASTNodeType};
 use std::fmt::Formatter;
 use std::io::Write;
 
-impl std::fmt::Display for Operator {
+impl std::fmt::Display for ASTNodeType {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            Operator::Plus => write!(f, "+"),
-            Operator::Minus => write!(f, "-"),
-            Operator::Star => write!(f, "*"),
-            Operator::Slash => write!(f, "/"),
+            ASTNodeType::Plus => write!(f, "+"),
+            ASTNodeType::Minus => write!(f, "-"),
+            ASTNodeType::Star => write!(f, "*"),
+            ASTNodeType::Slash => write!(f, "/"),
+            ASTNodeType::Read => write!(f, "Read"),
+            ASTNodeType::Write => write!(f, "Write"),
+            ASTNodeType::Connector => write!(f, "< >"),
+            ASTNodeType::Equals => write!(f, "="),
         }
     }
 }
-pub fn prefix_tree(root: &Node) {
-    match root {
-        Node::INT(n) => {
-            print!("{} ", n);
-            std::io::stdout().flush().expect("flush err");
-        }
-        Node::BinaryExpr { op, lhs, rhs } => {
-            print!("{} ", op);
-            std::io::stdout().flush().expect("flush err");
-            postfix_tree(lhs);
-            prefix_tree(rhs);
-        }
-    }
-}
-pub fn postfix_tree(root: &Node) {
-    match root {
-        Node::INT(n) => {
-            print!("{} ", n);
-            std::io::stdout().flush().expect("flush err");
-        }
-        Node::BinaryExpr { op, lhs, rhs } => {
-            postfix_tree(lhs);
-            postfix_tree(rhs);
-            print!("{} ", op);
-            std::io::stdout().flush().expect("flush err");
-        }
-    }
-}
-
-pub fn evaluate_ast(root: Node) -> i64 {
-    match root {
-        Node::INT(n) => n,
-        Node::BinaryExpr { op, lhs, rhs } => match op {
-            Operator::Plus => evaluate_ast(*lhs) + evaluate_ast(*rhs),
-            Operator::Minus => evaluate_ast(*lhs) - evaluate_ast(*rhs),
-            Operator::Star => evaluate_ast(*lhs) * evaluate_ast(*rhs),
-            Operator::Slash => evaluate_ast(*lhs) / evaluate_ast(*rhs),
-        },
-    }
-}
+//pub fn prefix_tree(root: &ASTNode) {
+//    match root {
+//        ASTNode::INT(n) => {
+//            print!("{} ", n);
+//            std::io::stdout().flush().expect("flush err");
+//        }
+//        ASTNode::BinaryExpr { op, lhs, rhs } => {
+//            print!("{} ", op);
+//            std::io::stdout().flush().expect("flush err");
+//            postfix_tree(lhs);
+//            prefix_tree(rhs);
+//        }
+//    }
+//}
+//pub fn postfix_tree(root: &ASTNode) {
+//    match root {
+//        ASTNode::INT(n) => {
+//            print!("{} ", n);
+//            std::io::stdout().flush().expect("flush err");
+//        }
+//        ASTNode::BinaryExpr { op, lhs, rhs } => {
+//            postfix_tree(lhs);
+//            postfix_tree(rhs);
+//            print!("{} ", op);
+//            std::io::stdout().flush().expect("flush err");
+//        }
+//    }
+//}
+//
+//pub fn evaluate_ast(root: ASTNode) -> i64 {
+//    match root {
+//        ASTNode::INT(n) => n,
+//        ASTNode::BinaryExpr { op, lhs, rhs } => match op {
+//            ASTNodeType::Plus => evaluate_ast(*lhs) + evaluate_ast(*rhs),
+//            ASTNodeType::Minus => evaluate_ast(*lhs) - evaluate_ast(*rhs),
+//            ASTNodeType::Star => evaluate_ast(*lhs) * evaluate_ast(*rhs),
+//            ASTNodeType::Slash => evaluate_ast(*lhs) / evaluate_ast(*rhs),
+//        },
+//    }
+//}
