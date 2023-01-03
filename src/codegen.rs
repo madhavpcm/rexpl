@@ -2,6 +2,7 @@
 use crate::parser_y::{ASTNode, ASTNodeType};
 use lazy_static::lazy_static; // 1.4.0
 use std::cmp::min;
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ const XSM_OFFSET_STACK: usize = 4096;
 lazy_static! {
     static ref REGISTERS: Mutex<Vec<(bool, i64)>> = Mutex::new(vec![(false, 0); MAX_REGISTERS]);
     static ref VARIABLES: Mutex<Vec<i64>> = Mutex::new(vec![0; MAX_VARIABLES]);
+    static ref VARIABLE_HASH: Mutex<HashMap<usize, usize>> = Mutex::new(HashMap::default());
 }
 /*
  * Function to assign a register which has the lowest index
@@ -62,25 +64,32 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
         ASTNode::VAR(var) => {
             let var_location: u8 = var.chars().nth(0).unwrap() as u8;
             let var_location: usize = var_location as usize;
-            (var_location - 97 + 4096 as usize).into()
+
+            let temp_register = get_reg();
+            let result = temp_register.clone();
+            let mut hashmap = VARIABLE_HASH.lock().unwrap();
+
+            let temp_operand = "R".to_owned() + temp_register.to_string().as_str();
+            if let Err(e) = writeln!(
+                file,
+                "MOV {}, [{}]",
+                temp_operand,
+                (var_location - 97 + XSM_OFFSET_STACK)
+            ) {
+                eprintln!("[code_gen] Write Error to file : {}", e);
+            }
+            hashmap.insert(temp_register, var_location - 97 + 4096);
+
+            result
         }
         ASTNode::BinaryNode { op, lhs, rhs } => {
             let left_register: usize = __code_gen(lhs, file).try_into().unwrap();
             let right_register: usize = __code_gen(rhs, file).try_into().unwrap();
 
-            let mut left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-            let mut right_operand: String = "R".to_owned() + right_register.to_string().as_str();
-
-            if left_register >= XSM_OFFSET_STACK {
-                left_operand = "[".to_owned() + left_register.to_string().as_str() + "]";
-            }
-
-            if right_register >= XSM_OFFSET_STACK {
-                right_operand = "[".to_owned() + right_register.to_string().as_str() + "]";
-            }
+            let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
+            let right_operand: String = "R".to_owned() + right_register.to_string().as_str();
 
             let mut registers = REGISTERS.lock().unwrap();
-            let mut variables = VARIABLES.lock().unwrap();
 
             let result = match op {
                 ASTNodeType::Plus => {
@@ -88,22 +97,10 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
 
-                    let mut result: i64 = 0;
-                    if left_register >= XSM_OFFSET_STACK {
-                        result += variables[left_register - XSM_OFFSET_STACK];
-                    } else {
-                        result += registers[left_register].1;
-                    }
-                    if right_register >= XSM_OFFSET_STACK {
-                        result += variables[right_register - XSM_OFFSET_STACK];
-                    } else {
-                        result += registers[right_register].1;
-                    }
+                    let result: i64 = registers[left_register].1 + registers[right_register].1;
 
                     let lower_register = min(left_register, right_register);
-                    if lower_register < XSM_OFFSET_STACK {
-                        registers[lower_register].1 = result;
-                    }
+                    registers[lower_register].1 = result;
 
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
@@ -114,22 +111,9 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                     if let Err(e) = writeln!(file, "SUB {}, {}", left_operand, right_operand) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
-                    let mut result: i64 = 0;
-                    if left_register >= XSM_OFFSET_STACK {
-                        result += variables[left_register - XSM_OFFSET_STACK];
-                    } else {
-                        result += registers[left_register].1;
-                    }
-                    if right_register >= XSM_OFFSET_STACK {
-                        result -= variables[right_register - XSM_OFFSET_STACK];
-                    } else {
-                        result -= registers[right_register].1;
-                    }
-
+                    let result: i64 = registers[left_register].1 - registers[right_register].1;
                     let lower_register = min(left_register, right_register);
-                    if lower_register < XSM_OFFSET_STACK {
-                        registers[lower_register].1 = result;
-                    }
+                    registers[lower_register].1 = result;
 
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
@@ -141,23 +125,11 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
 
-                    let mut result: i64 = 0;
-                    if left_register >= XSM_OFFSET_STACK {
-                        result += variables[left_register - XSM_OFFSET_STACK];
-                    } else {
-                        result += registers[left_register].1;
-                    }
-                    if right_register >= XSM_OFFSET_STACK {
-                        result *= variables[right_register - XSM_OFFSET_STACK];
-                    } else {
-                        result *= registers[right_register].1;
-                    }
+                    let result: i64 = registers[left_register].1 * registers[right_register].1;
 
                     let lower_register = min(left_register, right_register);
 
-                    if lower_register < XSM_OFFSET_STACK {
-                        registers[lower_register].1 = result;
-                    }
+                    registers[lower_register].1 = result;
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
                     free_reg(left_register + right_register - lower_register);
@@ -168,23 +140,10 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
 
-                    let mut result: i64 = 0;
-                    if left_register >= XSM_OFFSET_STACK {
-                        result += variables[left_register - XSM_OFFSET_STACK];
-                    } else {
-                        result += registers[left_register].1;
-                    }
-                    if right_register >= XSM_OFFSET_STACK {
-                        result /= variables[right_register - XSM_OFFSET_STACK];
-                    } else {
-                        result /= registers[right_register].1;
-                    }
-
+                    let result: i64 = registers[left_register].1 / registers[right_register].1;
                     let lower_register = min(left_register, right_register);
 
-                    if lower_register < XSM_OFFSET_STACK {
-                        registers[lower_register].1 = result;
-                    }
+                    registers[lower_register].1 = result;
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
                     free_reg(left_register + right_register - lower_register);
@@ -192,13 +151,36 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
 
                 ASTNodeType::Equals => {
-                    if left_register < XSM_OFFSET_STACK || left_register > XSM_OFFSET_STACK + 25 {
-                        eprintln!("[code_gen] Left hand side must be a variable");
+                    let mut hashmap = VARIABLE_HASH.lock().unwrap();
+
+                    if hashmap.contains_key(&left_register) == false {
+                        eprintln!("[code_gen] Too many variables to handle");
+                        return 1;
                     }
 
-                    if let Err(e) = writeln!(file, "MOV {},{}", left_operand, right_operand) {
+                    registers[left_register] = registers[right_register];
+
+                    if let Err(e) = writeln!(file, "MOV R{},R{}", left_register, right_register) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
+
+                    if let Err(e) = writeln!(
+                        file,
+                        "MOV [{}],R{}",
+                        hashmap.get(&left_register).unwrap(),
+                        left_register
+                    ) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+
+                    std::mem::drop(registers);
+
+                    for k in hashmap.keys() {
+                        free_reg(*k);
+                    }
+                    free_reg(left_register);
+                    free_reg(right_register);
+                    hashmap.clear();
                     0
                 }
                 ASTNodeType::Read => 0,
@@ -209,13 +191,27 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
         }
         ASTNode::UnaryNode { op, ptr } => match op {
             ASTNodeType::Read => {
-                let variable: usize = __code_gen(ptr, file).try_into().unwrap();
-                __xsm_read_syscall(file, variable);
+                let register: usize = __code_gen(ptr, file).try_into().unwrap();
+                let mut hashmap = VARIABLE_HASH.lock().unwrap();
+
+                __xsm_read_syscall(file, *hashmap.get(&register).unwrap());
+
+                for k in hashmap.keys() {
+                    free_reg(*k);
+                }
+                hashmap.clear();
                 0
             }
             ASTNodeType::Write => {
                 let variable: usize = __code_gen(ptr, file).try_into().unwrap();
+                let mut hashmap = VARIABLE_HASH.lock().unwrap();
+
                 __xsm_write_syscall(file, variable);
+
+                for k in hashmap.keys() {
+                    free_reg(*k);
+                }
+                hashmap.clear();
                 0
             }
             ASTNodeType::Plus => 0,
@@ -225,7 +221,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             ASTNodeType::Equals => 0,
             ASTNodeType::Connector => 0,
         },
-        ASTNode::Null(a) => 0,
+        ASTNode::Null(_a) => 0,
     }
 }
 
@@ -237,7 +233,7 @@ fn __header_gen(mut file: &File) {
 
 fn __xsm_write_syscall(mut file: &File, var: usize) {
     let register = get_reg();
-    if let Err(e) = writeln!(file, "MOV R{},\"Write\"\nPUSH R{}\nMOV R{},-2\nPUSH R{}\nMOV R{},[{}]\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
+    if let Err(e) = writeln!(file, "MOV R{},\"Write\"\nPUSH R{}\nMOV R{},-2\nPUSH R{}\nMOV R{},R{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
         eprintln!("[code_gen] Write error : {}", e);
     }
     free_reg(register);
@@ -259,7 +255,7 @@ fn __xsm_exit_syscall(mut file: &File) {
 }
 
 pub fn code_gen(root: &ASTNode) -> usize {
-    let mut f = OpenOptions::new()
+    let f = OpenOptions::new()
         .create(true)
         .write(true)
         .append(true)

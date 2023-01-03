@@ -1,6 +1,5 @@
-use crate::parser_y::{ASTNode, ASTNodeType};
+use crate::parser_y::ASTNodeType;
 use std::fmt::Formatter;
-use std::io::Write;
 
 impl std::fmt::Display for ASTNodeType {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
