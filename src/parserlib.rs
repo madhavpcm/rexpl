@@ -101,6 +101,8 @@ pub fn validate_ast_binary_node(
                 false
             }
         }
+        ASTNode::INT(_a) => true,
+        ASTNode::VAR(_a) => true,
         _ => false,
     };
     let right: bool = match rhs {
@@ -116,6 +118,8 @@ pub fn validate_ast_binary_node(
                 false
             }
         }
+        ASTNode::INT(_a) => true,
+        ASTNode::VAR(_a) => true,
         _ => false,
     };
     return Ok(right && left);
@@ -132,6 +136,8 @@ pub fn validate_condition_expression(expr: &ASTNode) -> Result<bool, ()> {
             ASTExprType::Bool => true,
             _ => false,
         },
+        ASTNode::INT(_a) => true,
+        ASTNode::VAR(_a) => true,
         _ => false,
     };
 
