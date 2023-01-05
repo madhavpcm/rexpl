@@ -1,6 +1,7 @@
 //register use table
-use crate::parser_y::{ASTNode, ASTNodeType};
+use crate::parserlib::*;
 use lazy_static::lazy_static; // 1.4.0
+use log::error;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -17,6 +18,7 @@ lazy_static! {
     static ref REGISTERS: Mutex<Vec<(bool, i64)>> = Mutex::new(vec![(false, 0); MAX_REGISTERS]);
     static ref VARIABLES: Mutex<Vec<i64>> = Mutex::new(vec![0; MAX_VARIABLES]);
     static ref VARIABLE_HASH: Mutex<HashMap<usize, usize>> = Mutex::new(HashMap::default());
+    static ref LABEL_COUNT: Mutex<u64> = Mutex::new(0);
 }
 /*
  * Function to assign a register which has the lowest index
@@ -51,10 +53,16 @@ pub fn free_reg(register: usize) -> u64 {
  */
 fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
     match root {
+        ASTNode::ErrorNode { err } => {
+            let err: String = match err {
+                ASTError::TypeError(s) => s.to_owned(),
+            };
+            log::error!("{}", err);
+            0
+        }
         ASTNode::INT(n) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-
             if let Err(e) = writeln!(file, "MOV R{},{}", register, n) {
                 eprintln!("[code_gen] Write Error to file : {}", e);
             }
@@ -64,11 +72,9 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
         ASTNode::VAR(var) => {
             let var_location: u8 = var.chars().nth(0).unwrap() as u8;
             let var_location: usize = var_location as usize;
-
             let temp_register = get_reg();
             let result = temp_register.clone();
             let mut hashmap = VARIABLE_HASH.lock().unwrap();
-
             let temp_operand = "R".to_owned() + temp_register.to_string().as_str();
             if let Err(e) = writeln!(
                 file,
@@ -79,29 +85,111 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 eprintln!("[code_gen] Write Error to file : {}", e);
             }
             hashmap.insert(temp_register, var_location - 97 + 4096);
-
             result
         }
-        ASTNode::BinaryNode { op, lhs, rhs } => {
+        ASTNode::BinaryNode {
+            op,
+            exprtype: _,
+            lhs,
+            rhs,
+        } => {
             let left_register: usize = __code_gen(lhs, file).try_into().unwrap();
             let right_register: usize = __code_gen(rhs, file).try_into().unwrap();
-
             let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
             let right_operand: String = "R".to_owned() + right_register.to_string().as_str();
-
             let mut registers = REGISTERS.lock().unwrap();
-
             let result = match op {
+                ASTNodeType::Gt => {
+                    if let Err(e) = writeln!(file, "GT {}, {}", left_operand, right_operand) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+                    let result: i64 = (registers[left_register].1 > registers[right_register].1)
+                        .try_into()
+                        .unwrap();
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
+                ASTNodeType::Lt => {
+                    if let Err(e) = writeln!(file, "LT {}, {}", left_operand, right_operand) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+                    let result: i64 = (registers[left_register].1 < registers[right_register].1)
+                        .try_into()
+                        .unwrap();
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
+                ASTNodeType::Gte => {
+                    if let Err(e) = writeln!(file, "GTE {}, {}", left_operand, right_operand) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+                    let result: i64 = (registers[left_register].1 >= registers[right_register].1)
+                        .try_into()
+                        .unwrap();
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
+                ASTNodeType::Lte => {
+                    if let Err(e) = writeln!(file, "LTE {}, {}", left_operand, right_operand) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+                    let result: i64 = (registers[left_register].1 <= registers[right_register].1)
+                        .try_into()
+                        .unwrap();
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
+                ASTNodeType::Ee => {
+                    if let Err(e) = writeln!(file, "EQ {}, {}", left_operand, right_operand) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+                    let result: i64 = (registers[left_register].1 == registers[right_register].1)
+                        .try_into()
+                        .unwrap();
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
+                ASTNodeType::Ne => {
+                    if let Err(e) = writeln!(file, "NE {}, {}", left_operand, right_operand) {
+                        eprintln!("[code_gen] Write Error to file : {}", e);
+                    }
+                    let result: i64 = (registers[left_register].1 != registers[right_register].1)
+                        .try_into()
+                        .unwrap();
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
                 ASTNodeType::Plus => {
                     if let Err(e) = writeln!(file, "ADD {}, {}", left_operand, right_operand) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
-
                     let result: i64 = registers[left_register].1 + registers[right_register].1;
-
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
-
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
                     free_reg(left_register + right_register - lower_register);
@@ -114,7 +202,6 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                     let result: i64 = registers[left_register].1 - registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
-
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
                     free_reg(left_register + right_register - lower_register);
@@ -124,11 +211,8 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                     if let Err(e) = writeln!(file, "MUL {}, {}", left_operand, right_operand) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
-
                     let result: i64 = registers[left_register].1 * registers[right_register].1;
-
                     let lower_register = min(left_register, right_register);
-
                     registers[lower_register].1 = result;
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
@@ -139,31 +223,24 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                     if let Err(e) = writeln!(file, "DIV {}, {}", left_operand, right_operand) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
-
                     let result: i64 = registers[left_register].1 / registers[right_register].1;
                     let lower_register = min(left_register, right_register);
-
                     registers[lower_register].1 = result;
                     // release mutex for global array so that register can be freed
                     std::mem::drop(registers);
                     free_reg(left_register + right_register - lower_register);
                     lower_register
                 }
-
                 ASTNodeType::Equals => {
                     let mut hashmap = VARIABLE_HASH.lock().unwrap();
-
                     if hashmap.contains_key(&left_register) == false {
                         eprintln!("[code_gen] Too many variables to handle");
                         return 1;
                     }
-
                     registers[left_register] = registers[right_register];
-
                     if let Err(e) = writeln!(file, "MOV R{},R{}", left_register, right_register) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
-
                     if let Err(e) = writeln!(
                         file,
                         "MOV [{}],R{}",
@@ -172,9 +249,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                     ) {
                         eprintln!("[code_gen] Write Error to file : {}", e);
                     }
-
                     std::mem::drop(registers);
-
                     for k in hashmap.keys() {
                         free_reg(*k);
                     }
@@ -183,9 +258,8 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                     hashmap.clear();
                     0
                 }
-                ASTNodeType::Read => 0,
-                ASTNodeType::Write => 0,
                 ASTNodeType::Connector => 0,
+                _ => 0,
             };
             result
         }
@@ -193,9 +267,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             ASTNodeType::Read => {
                 let register: usize = __code_gen(ptr, file).try_into().unwrap();
                 let mut hashmap = VARIABLE_HASH.lock().unwrap();
-
                 __xsm_read_syscall(file, *hashmap.get(&register).unwrap());
-
                 for k in hashmap.keys() {
                     free_reg(*k);
                 }
@@ -205,32 +277,145 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             ASTNodeType::Write => {
                 let variable: usize = __code_gen(ptr, file).try_into().unwrap();
                 let mut hashmap = VARIABLE_HASH.lock().unwrap();
-
                 __xsm_write_syscall(file, variable);
-
                 for k in hashmap.keys() {
                     free_reg(*k);
                 }
                 hashmap.clear();
                 0
             }
-            ASTNodeType::Plus => 0,
-            ASTNodeType::Minus => 0,
-            ASTNodeType::Star => 0,
-            ASTNodeType::Slash => 0,
-            ASTNodeType::Equals => 0,
-            ASTNodeType::Connector => 0,
+            _ => 0,
         },
+        /*
+         * <expr>
+         * <cond>
+         * <jz> L1
+         * <if>
+         * jmp L2
+         * L1:
+         * <else>
+         * L2:
+         */
+        ASTNode::IfElseNode { expr, xif, xelse } => {
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let l1 = label_count.clone();
+            (*label_count) += 1;
+            let l2 = label_count.clone();
+            (*label_count) += 1;
+            //drop for handling nested cases
+            std::mem::drop(label_count);
+            let result: usize = __code_gen(expr, file).try_into().unwrap();
+            //Generate code for the expression
+            if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l1) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //Free the register
+            free_reg(result);
+            //Drop label_count so that nested cases can be handled
+            //generate if case flow
+            __code_gen(xif, file);
+            //result is 0 as xif is a stmtlist
+            //Jmp to L2 if its else case
+            if let Err(e) = writeln!(file, "JMP L{}", l2) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //add label count for exit case
+            if let Err(e) = writeln!(file, "L{}:", l1) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            __code_gen(xelse, file);
+            if let Err(e) = writeln!(file, "L{}:", l2) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            0
+        }
+        /* While Node
+         * L1:
+         * <expr>
+         * <cond>
+         * <jz> L2
+         * <do>
+         * <jmp> L1
+         * L2:
+         */
+        ASTNode::WhileNode { expr, xdo } => {
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let l1 = label_count.clone();
+            //Create a new label
+            if let Err(e) = writeln!(file, "L{}:", l1) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            (*label_count) += 1;
+            let l2 = label_count.clone();
+            (*label_count) += 1;
+            //Drop label_count so that nested cases can be handled
+            std::mem::drop(label_count);
+            let result: usize = __code_gen(expr, file).try_into().unwrap();
+            //Generate code for the expression
+            if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l2) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //Free the register
+            free_reg(result);
+            //generate if case flow
+            //result is 0 as xif is a stmtlist
+            __code_gen(xdo, file);
+            //while loop it back to top condition
+            if let Err(e) = writeln!(file, "JMP L{}", l1) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //add label count for exit case
+            if let Err(e) = writeln!(file, "L{}:", l2) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //increment label_count
+            0
+        }
+        /* If Node
+         * <expr>
+         * <cond>
+         * <jz> L1
+         * <ifcase>
+         * L1:
+         */
+        ASTNode::IfNode { expr, xif } => {
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let l1 = label_count.clone();
+            (*label_count) += 1;
+            //Drop label_count so that nested cases can be handled
+            std::mem::drop(label_count);
+            let result: usize = __code_gen(expr, file).try_into().unwrap();
+            //Generate code for the expression
+            if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l1) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //Free the register
+            free_reg(result);
+            //generate if case flow
+            __code_gen(xif, file);
+            //result is 0 as xif is a stmtlist
+            if let Err(e) = writeln!(file, "L{}:", l1) {
+                eprintln!("[code_gen] wrerror : {}", e);
+            }
+            //increment label_count
+            0
+        }
         ASTNode::Null(_a) => 0,
     }
 }
 
+/*
+ * Meta function to generate header compatible to XSM ABI Standard
+ */
 fn __header_gen(mut file: &File) {
     if let Err(e) = writeln!(file, "0\n2056\n0\n0\n0\n0\n0\n0\nMOV SP,4121") {
         eprintln!("[code_gen] Write error : {}", e);
     }
 }
 
+/*
+ * Meta function to generate xsm code for Write Syscall of expos
+ */
 fn __xsm_write_syscall(mut file: &File, var: usize) {
     let register = get_reg();
     if let Err(e) = writeln!(file, "MOV R{},\"Write\"\nPUSH R{}\nMOV R{},-2\nPUSH R{}\nMOV R{},R{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
@@ -239,6 +424,9 @@ fn __xsm_write_syscall(mut file: &File, var: usize) {
     free_reg(register);
 }
 
+/*
+ * Meta function to generate xsm code for Read Syscall of expos
+ */
 fn __xsm_read_syscall(mut file: &File, var: usize) {
     let register = get_reg();
     if let Err(e) = writeln!(file, "MOV R{},\"Read\"\nPUSH R{}\nMOV R{},-1\nPUSH R{}\nMOV R{},{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
@@ -246,6 +434,10 @@ fn __xsm_read_syscall(mut file: &File, var: usize) {
     }
     free_reg(register);
 }
+
+/*
+ * Meta function to generate xsm code for Exit Syscall of expos
+ */
 fn __xsm_exit_syscall(mut file: &File) {
     let register = get_reg();
     if let Err(e) = writeln!(file, "INT 10") {

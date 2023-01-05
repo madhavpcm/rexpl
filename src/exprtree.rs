@@ -1,4 +1,4 @@
-use crate::parser_y::ASTNodeType;
+use crate::parserlib::ASTNodeType;
 use std::fmt::Formatter;
 
 impl std::fmt::Display for ASTNodeType {
@@ -12,6 +12,9 @@ impl std::fmt::Display for ASTNodeType {
             ASTNodeType::Write => write!(f, "Write"),
             ASTNodeType::Connector => write!(f, "< >"),
             ASTNodeType::Equals => write!(f, "="),
+            _ => {
+                write!(f, "Node")
+            }
         }
     }
 }

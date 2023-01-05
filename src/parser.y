@@ -7,28 +7,78 @@
 %token "END"
 %token "READ"
 %token "WRITE"
-%token "VAR"
-%token "COND"
-%token "{"
-%token "}"
-%token "("
-%token ")"
-%token ";"
 %token "IF"
-%token "FI"
+%token "THEN"
+%token "ELSE"
+%token "ENDIF"
+%token "WHILE"
+%token "DO"
+%token "ENDWHILE"
+%token "VAR"
+%token ";"
 %token "="
+%nonassoc ">" "<" ">=" '<=' "==" "!="
 %left '+' '-'
 %left '*' '/'
 
 %%
+WhileStmt -> Result<ASTNode, ()>:
+    "WHILE" '(' Expr ')' "DO" StmtList "ENDWHILE" ';'
+    {
+        let expr = $3?;
+
+        if validate_condition_expression(&expr) == Ok(false) {
+            return Ok(ASTNode::ErrorNode{
+                err : ASTError::TypeError("Expected a boolean expression".to_owned()),
+            });
+        }
+        Ok(ASTNode::WhileNode{
+            expr: Box::new(expr),
+            xdo: Box::new($6?),
+        })
+    }
+    ;
+
+IfStmt -> Result<ASTNode, ()>:
+	"IF" '(' Expr ')' "THEN" StmtList "ELSE" StmtList "ENDIF" ';'
+	{
+        let expr = $3?;
+
+        if validate_condition_expression(&expr) == Ok(false) {
+            return Ok(ASTNode::ErrorNode{
+                err : ASTError::TypeError("Expected a boolean expression".to_owned()),
+            });
+        }
+        Ok(ASTNode::IfElseNode{
+            expr: Box::new(expr),
+            xif: Box::new($6?),
+            xelse: Box::new($8?),
+        })
+	}
+	| "IF" '(' Expr ')' "THEN" StmtList "ENDIF" ';'
+	{
+        let expr = $3?;
+
+        if validate_condition_expression(&expr) == Ok(false) {
+            return Ok(ASTNode::ErrorNode{
+                err : ASTError::TypeError("Expected a boolean expression".to_owned()),
+            });
+        }
+        Ok(ASTNode::IfNode{
+            expr: Box::new(expr),
+            xif: Box::new($6?),
+        })
+	}
+	;
+
 Start -> Result<ASTNode, ()>:
 	"BEGIN" StmtList "END" ';'
 	{
-		$2	
+		$2
 	}
 	| "BEGIN" "END" ';'
 	{
-		Ok(ASTNode::Null(0))	
+		Ok(ASTNode::Null(0))
 	}
 	;
 
@@ -37,6 +87,7 @@ StmtList -> Result<ASTNode, ()>:
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
+            exprtype : ASTExprType::Null,
 			lhs : Box::new($1?),
 			rhs : Box::new($2?),
 		})
@@ -60,6 +111,14 @@ Stmt -> Result<ASTNode,()>:
 	{
 		$1
 	}
+	| WhileStmt
+	{
+		$1
+	}
+    | IfStmt
+	{
+		$1
+	}
 	;
 
 InputStmt -> Result<ASTNode, ()>:
@@ -69,7 +128,6 @@ InputStmt -> Result<ASTNode, ()>:
 			op : ASTNodeType::Read,
 			ptr : Box::new($3?),
 		})
-
 	}
 	;
 
@@ -87,6 +145,7 @@ AssgStmt -> Result<ASTNode, ()>:
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Equals,
+            exprtype : ASTExprType::Null,
 			lhs : Box::new($1?),
 			rhs : Box::new($3?),
 		})
@@ -94,37 +153,213 @@ AssgStmt -> Result<ASTNode, ()>:
 	;
 
 Expr -> Result<ASTNode,()>:
-	Expr '+' Expr 
+	Expr '<' Expr 
 	{
-        Ok(ASTNode::BinaryNode{
-            op : ASTNodeType::Plus,
-            lhs : Box::new($1?),
-            rhs : Box::new($3?),
-        })
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Lt,
+			exprtype : ASTExprType::Bool,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '>' Expr 
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Gt,
+			exprtype : ASTExprType::Bool,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '<=' Expr 
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Lte,
+			exprtype : ASTExprType::Bool,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '>=' Expr 
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Gte,
+			exprtype : ASTExprType::Bool,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '!=' Expr 
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Ne,
+			exprtype : ASTExprType::Bool,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '==' Expr 
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Ee,
+			exprtype : ASTExprType::Bool,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '+' Expr
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Plus,
+			exprtype : ASTExprType::Int,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
 	}
 	| Expr '-' Expr
 	{
-        Ok(ASTNode::BinaryNode{
-            op : ASTNodeType::Minus,
-            lhs : Box::new($1?),
-            rhs : Box::new($3?),
-        })
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Minus,
+			exprtype : ASTExprType::Int,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
 	}
 	| Expr '*' Expr
 	{
-        Ok(ASTNode::BinaryNode{
-            op : ASTNodeType::Star,
-            lhs : Box::new($1?),
-            rhs : Box::new($3?),
-        })
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Star,
+			exprtype : ASTExprType::Int,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
 	}
 	| Expr '/' Expr
 	{
-        Ok(ASTNode::BinaryNode{
-            op : ASTNodeType::Slash,
-            lhs : Box::new($1?),
-            rhs : Box::new($3?),
-        })
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Slash,
+			exprtype : ASTExprType::Int,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
 	}
     | '(' Expr ')'
     {
@@ -152,53 +387,4 @@ Variable -> Result<ASTNode,()>:
 	;
 %%
 // Any functions here are in scope for all the grammar actions above.
-use lazy_static::lazy_static;
-use std::sync::Mutex;
-use std::fmt::Debug;
-
-lazy_static!{
-    pub static ref COUNT: Mutex<i32> = Mutex::new(0);
-}
-
-#[derive(Debug)]
-pub enum ASTNodeType {
-    Plus,
-    Minus,
-    Star,
-    Slash,
-	Equals,
-    Read,
-    Write,
-    Connector,
-}
-
-#[derive(Debug)]
-
-pub enum ASTNode {
-    INT(i64),
-    VAR(String),
-    BinaryNode {
-        op: ASTNodeType,
-        lhs: Box<ASTNode>,
-        rhs: Box<ASTNode>,
-    },
-	UnaryNode{
-		op: ASTNodeType,
-		ptr: Box<ASTNode>,
-	},
-	Null(i64),
-}
-fn parse_int(s: &str) -> Result<i64, ()> {
-    match s.parse::<i64>() {
-        Ok(val) => Ok(val),
-        Err(_) => {
-            eprintln!("{} cannot be represented as a i64", s);
-            Err(())
-        }
-    }
-}
-
-pub fn parse_string(s: &str) -> Result<String, ()> {
-	Ok(s.to_owned())
-}
-
+use crate::parserlib::{*};

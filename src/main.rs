@@ -9,10 +9,13 @@ use std::{
 };
 
 //Modules
-mod codegen;
-mod exprtree;
+
 lrlex_mod!("lexer.l");
 lrpar_mod!("parser.y");
+
+mod codegen;
+mod exprtree;
+mod parserlib;
 
 fn read_file(path: &str) -> String {
     let mut f = match File::open(path) {
