@@ -15,6 +15,7 @@ lrpar_mod!("parser.y");
 
 mod codegen;
 mod exprtree;
+mod linker;
 mod parserlib;
 
 fn read_file(path: &str) -> String {
@@ -44,6 +45,6 @@ fn main() {
     if let Some(Ok(r)) = expr_res {
         codegen::code_gen(&r);
     }
-
+    linker::linker("a.xsm").expect("Recompile");
     return;
 }

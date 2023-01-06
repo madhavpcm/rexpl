@@ -6,4 +6,5 @@ if (a < b) then
     if (b < c) then write(c); else write(b); endif;
 else
     if (a < c) then write(c); else write(a); endif;
-endif;end;
+endif;
+end;
