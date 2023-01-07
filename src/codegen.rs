@@ -17,7 +17,8 @@ lazy_static! {
     static ref REGISTERS: Mutex<Vec<(bool, i64)>> = Mutex::new(vec![(false, 0); MAX_REGISTERS]);
     static ref VARIABLES: Mutex<Vec<i64>> = Mutex::new(vec![0; MAX_VARIABLES]);
     static ref VARIABLE_HASH: Mutex<HashMap<usize, usize>> = Mutex::new(HashMap::default());
-    static ref LABEL_COUNT: Mutex<u64> = Mutex::new(0);
+    static ref LABEL_COUNT: Mutex<usize> = Mutex::new(0);
+    static ref WHILE_TRACKER: Mutex<Vec<usize>> = Mutex::new(Vec::default());
 }
 /*
  * Function to assign a register which has the lowest index
@@ -339,16 +340,23 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
          */
         ASTNode::WhileNode { expr, xdo } => {
             let mut label_count = LABEL_COUNT.lock().unwrap();
+            let mut while_tracker = WHILE_TRACKER.lock().unwrap();
+
             let l1 = label_count.clone();
             //Create a new label
             if let Err(e) = writeln!(file, "L{}:", l1) {
                 eprintln!("[code_gen] wrerror : {}", e);
             }
             (*label_count) += 1;
+
             let l2 = label_count.clone();
             (*label_count) += 1;
+
+            while_tracker.push(l1);
+            while_tracker.push(l2);
             //Drop label_count so that nested cases can be handled
             std::mem::drop(label_count);
+            std::mem::drop(while_tracker);
             let result: usize = __code_gen(expr, file).try_into().unwrap();
             //Generate code for the expression
             if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l2) {
@@ -360,6 +368,10 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             //result is 0 as xif is a stmtlist
             __code_gen(xdo, file);
             //while loop it back to top condition
+
+            let mut while_tracker = WHILE_TRACKER.lock().unwrap();
+            while_tracker.pop();
+            while_tracker.pop();
             if let Err(e) = writeln!(file, "JMP L{}", l1) {
                 eprintln!("[code_gen] wrerror : {}", e);
             }
@@ -397,6 +409,18 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 eprintln!("[code_gen] wrerror : {}", e);
             }
             //increment label_count
+            0
+        }
+        ASTNode::BreakNode => {
+            let while_tracker = WHILE_TRACKER.lock().unwrap();
+            writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 1])
+                .expect("[code_gen] Write error");
+            0
+        }
+        ASTNode::ContinueNode => {
+            let while_tracker = WHILE_TRACKER.lock().unwrap();
+            writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 2])
+                .expect("[code_gen] Write error");
             0
         }
         ASTNode::Null(_a) => 0,

@@ -67,6 +67,8 @@ pub enum ASTNode {
     ErrorNode {
         err: ASTError,
     },
+    BreakNode,
+    ContinueNode,
     Null(i64),
 }
 pub fn parse_int(s: &str) -> Result<i64, ()> {

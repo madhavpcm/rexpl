@@ -15,6 +15,8 @@
 %token "DO"
 %token "ENDWHILE"
 %token "VAR"
+%token "BREAK"
+%token "CONTINUE"
 %token ";"
 %token "="
 %nonassoc ">" "<" ">=" '<=' "==" "!="
@@ -118,6 +120,14 @@ Stmt -> Result<ASTNode,()>:
     | IfStmt
 	{
 		$1
+	}
+	| "BREAK" ';'
+	{
+		Ok(ASTNode::BreakNode)
+	}
+	| "CONTINUE" ';'
+	{
+		Ok(ASTNode::ContinueNode)
 	}
 	;
 

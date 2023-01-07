@@ -13,6 +13,8 @@ end "END"
 read "READ"
 write "WRITE"
 then "THEN"
+break "BREAK"
+continue "CONTINUE"
 
 == "=="
 <= "<="
