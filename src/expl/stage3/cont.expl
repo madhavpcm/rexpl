@@ -1,0 +1,10 @@
+begin
+read(a);
+while ( a < 30 ) do
+	if (a == 2) then
+		write(a);
+		continue;
+	endif;
+	read(a);
+endwhile;
+end;

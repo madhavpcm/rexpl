@@ -1,10 +1,6 @@
 use std::fmt::Debug;
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum ASTNodeError {
-    TypeError(String),
-}
-#[derive(Debug, Eq, PartialEq)]
 pub enum ASTNodeType {
     Plus,
     Minus,

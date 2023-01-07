@@ -3,7 +3,7 @@ use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 use std::{
     env,
-    fs::{read_dir, File},
+    fs::File,
     io::{stderr, Read, Write},
     process,
 };
