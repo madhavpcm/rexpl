@@ -451,7 +451,7 @@ pub fn code_gen(root: &ASTNode) -> usize {
         .create(true)
         .write(true)
         .append(true)
-        .open("a.xsm");
+        .open("a.o");
 
     match f {
         Ok(mut file) => {

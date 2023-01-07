@@ -45,6 +45,6 @@ fn main() {
     if let Some(Ok(r)) = expr_res {
         codegen::code_gen(&r);
     }
-    linker::linker("a.xsm").expect("Recompile");
+    linker::linker("a.o").expect("Recompile");
     return;
 }
