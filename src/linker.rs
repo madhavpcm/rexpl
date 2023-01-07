@@ -6,11 +6,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{stderr, Read, Write};
 
 lrlex::lrlex_mod!("linker.l");
-const XSM_START: u32 = 2056;
-// > get tokens
-// > calclulate lineno of each token
-// > convert lineno of each token to xsm relative address
-// > replace every occurance to xsm relative address
+const XSM_START: usize = 2056;
 
 fn read_file(path: &str) -> String {
     let mut f = match File::open(path) {
@@ -28,28 +24,40 @@ fn read_file(path: &str) -> String {
  * Line no to xsm address converter function
  */
 #[inline]
-fn __get_xsm_address(line: u32) -> u32 {
-    XSM_START + (line - (8 - 1)) * 2
+fn __get_xsm_address(line: usize) -> usize {
+    if line < 9 {
+        return 0;
+    }
+    XSM_START + (line - 9) * 2
 }
 /*
  * Linker, accepts a file, detects labels, replaces them xsm addresses
+ * ALGORITHM
+* > get tokens
+* > calclulate lineno of each token
+* > convert lineno of each token to xsm relative address
+* > replace every occurance to xsm relative address
  */
 pub fn linker(filename: &str) -> Result<bool, ()> {
     let lexerdef = linker_l::lexerdef();
-
-    let mut input = read_file(filename);
+    let mut input = read_file((filename.to_owned() + ".o").as_str());
     // O(n) first pass
     let lexer = lexerdef.lexer(&input);
-
+    //to match labels which may consecutively occur together
     let label_regex = Regex::new(r"L(\d+)").unwrap();
-    let mut label_map: HashMap<String, u32>;
+
+    //Symbol table for <label> <address> pair
+    let mut label_map: HashMap<String, usize>;
     label_map = HashMap::default();
 
+    //we need the lexemes to be in reverse order to avoid index out of bounds when removing
     let mut lexerrev: Vec<Result<DefaultLexeme<u32>, LexError>> = Vec::default();
     for r in lexer.iter() {
         lexerrev.push(r);
     }
+    //Collection of tags, where each tag may consist of multiple label but have same assembly address
     let mut tags: Vec<Vec<String>> = Vec::default();
+    //Spans of the locations of each tag
     let mut locations: Vec<Span> = Vec::default();
 
     // O(Unique Addresses)
@@ -72,8 +80,8 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
         };
         tags.push(tag);
     }
-    let mut lineno: u32 = 1;
-    // assign address to each label
+    let mut lineno: usize = 1;
+    // Pass 2 to determine the address of each tag
     for line in input.lines() {
         for tag in tags.iter().rev() {
             // if any label is matched with the tag
@@ -94,6 +102,8 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
                 for label in tag {
                     label_map.insert(label.clone(), __get_xsm_address(lineno));
                 }
+                lineno -= tag.len();
+                break;
             }
             // all labels in the tag get the same address
         }
@@ -112,10 +122,10 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
         .create(true)
         .write(true)
         .append(true)
-        .open("a.xsm")
+        .open(filename.to_owned() + ".xsm")
         .expect("[linker] xsm file write error");
 
-    // Pass 3, replace label with address
+    // Pass 3, replace label with address and write to new file
     for line in input.lines() {
         let mut flag: bool = false;
         for (k, v) in label_map.iter() {
@@ -133,6 +143,5 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
         }
     }
 
-    println!("{}", input);
     Ok(false)
 }

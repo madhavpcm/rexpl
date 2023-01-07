@@ -1,7 +1,6 @@
 //register use table
 use crate::parserlib::*;
 use lazy_static::lazy_static; // 1.4.0
-use log::error;
 use std::cmp::min;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -446,12 +445,12 @@ fn __xsm_exit_syscall(mut file: &File) {
     free_reg(register);
 }
 
-pub fn code_gen(root: &ASTNode) -> usize {
+pub fn code_gen(root: &ASTNode, filename: String) -> usize {
     let f = OpenOptions::new()
         .create(true)
         .write(true)
         .append(true)
-        .open("a.o");
+        .open(filename.as_str());
 
     match f {
         Ok(mut file) => {
@@ -459,11 +458,11 @@ pub fn code_gen(root: &ASTNode) -> usize {
                 .expect("[code_gen] Error truncating existing file");
             __header_gen(&file);
             let result: usize = __code_gen(root, &file);
-
             if let Err(e) = writeln!(file, "PUSH R{}", result) {
                 eprintln!("[code_gen] Write error : {}", e);
             }
             __xsm_exit_syscall(&file);
+            println!("Generated Object file: {}", filename.as_str());
             result
         }
         Err(e) => {
