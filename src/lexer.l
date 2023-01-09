@@ -15,6 +15,10 @@ write "WRITE"
 then "THEN"
 break "BREAK"
 continue "CONTINUE"
+decl "DECL"
+enddecl "ENDDECL"
+str "STR_T"
+int "INT_T"
 
 == "=="
 <= "<="
@@ -23,9 +27,10 @@ continue "CONTINUE"
 < "<"
 > ">"
 
-[a-z] "VAR"
-[0-9]+[.][0-9]+ "FLOAT"
+[a-z|A-Z|_][a-z|A-Z|_|0-9]* "VAR"
 [0-9]+ "INT"
+["](.|[^"])*["] "STR"
+
 = "="
 \+ "+"
 \* "*"
@@ -36,5 +41,6 @@ continue "CONTINUE"
 \{ "{"
 \} "}"
 ; ";"
+, ','
 [\t\n ]+ ;
 

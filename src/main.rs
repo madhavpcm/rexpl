@@ -1,4 +1,5 @@
 // Libraries
+use env_logger::{Builder, Env};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 use std::{
@@ -35,8 +36,21 @@ fn main() {
     let lexerdef = lexer_l::lexerdef();
     let args: Vec<String> = env::args().collect();
 
+    Builder::from_env(Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            let mut style = buf.style();
+            style.set_color(match record.level() {
+                log::Level::Error => env_logger::fmt::Color::Red,
+                log::Level::Warn => env_logger::fmt::Color::Yellow,
+                log::Level::Info => env_logger::fmt::Color::Blue,
+                log::Level::Trace => env_logger::fmt::Color::White,
+                log::Level::Debug => env_logger::fmt::Color::Magenta,
+            });
+            writeln!(buf, "[{}] {}", style.value(record.level()), record.args())
+        })
+        .init();
+
     let input = &read_file(&args[1]);
-    println!("Input is {}", input);
     let lexer_ = lexerdef.lexer(input);
 
     let filename = *args[1]

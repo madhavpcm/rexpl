@@ -1,8 +1,10 @@
 %start Start 
 %avoid_insert "INT"
-%avoid_insert "FLOAT"
+%avoid_insert "STR"
 %avoid_insert "SINGLE_COMMENT"
 %avoid_insert "MULTI_COMMENT"
+%avoid_insert "STR_T"
+%avoid_insert "INT_T"
 %token "BEGIN"
 %token "END"
 %token "READ"
@@ -17,6 +19,8 @@
 %token "VAR"
 %token "BREAK"
 %token "CONTINUE"
+%token "DECL"
+%token "ENDDECL"
 %token ";"
 %token "="
 %nonassoc ">" "<" ">=" '<=' "==" "!="
@@ -24,11 +28,88 @@
 %left '*' '/'
 
 %%
+DeclBlock -> Result<ASTNode,()>:
+	"DECL" DeclList "ENDDECL" ';'
+	{
+		$2
+	}
+	| "DECL" "ENDDECL" ';'
+	{
+		Ok(ASTNode::Null)
+	}
+	;
+
+DeclList -> Result<ASTNode, ()>:
+	DeclList Decl 
+	{
+		let decl = $2?;
+
+		__gentypehash(&decl);
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Connector,
+            exprtype : ASTExprType::Null,
+			lhs : Box::new($1?),
+			rhs : Box::new(decl),
+		})
+	}
+	|
+	Decl
+	{
+		let decl =$1?;
+		__gentypehash(&decl);
+		Ok(decl)
+	}
+	;
+
+Decl ->  Result<ASTNode,()>:
+	Type VarList ';'
+	{
+		Ok(ASTNode::DeclNode{
+			var_type: $1?,
+			list: Box::new($2?)
+		})
+	}
+	;
+
+Type -> Result<ASTExprType, ()>:
+	"INT_T"
+	{
+		Ok(ASTExprType::Int)
+	} 
+	| "STR_T"
+	{
+		Ok(ASTExprType::String)
+	}
+	;
+
+VarList -> Result<VarList,()>:
+	VarList ',' "VAR" 
+	{
+		let v = $3.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		Ok(VarList::Node{
+			var: var,
+			next: Box::new($1?),
+		})
+	}
+	| "VAR" 
+	{
+		let v = $1.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		Ok(VarList::Node{
+			var: var,
+			next: Box::new(VarList::Null),
+		})
+	}
+    ;
+
+
+	
 WhileStmt -> Result<ASTNode, ()>:
     "WHILE" '(' Expr ')' "DO" StmtList "ENDWHILE" ';'
     {
         let expr = $3?;
-
         if validate_condition_expression(&expr) == Ok(false) {
             return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Expected a boolean expression".to_owned()),
@@ -74,13 +155,24 @@ IfStmt -> Result<ASTNode, ()>:
 	;
 
 Start -> Result<ASTNode, ()>:
+	DeclBlock BeginBlock
+	{
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Connector,
+            exprtype : ASTExprType::Null,
+			lhs : Box::new($1?),
+			rhs : Box::new($2?),
+		})
+	}
+	;
+BeginBlock -> Result<ASTNode,()>:
 	"BEGIN" StmtList "END" ';'
 	{
 		$2
 	}
 	| "BEGIN" "END" ';'
 	{
-		Ok(ASTNode::Null(0))
+		Ok(ASTNode::Null)
 	}
 	;
 
@@ -296,7 +388,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -317,7 +409,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -337,7 +429,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -358,7 +450,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -380,6 +472,12 @@ Expr -> Result<ASTNode,()>:
 		let v = $1.map_err(|_| ())?;
         let num  = parse_int($lexer.span_str(v.span())).unwrap();
         Ok(ASTNode::INT(num))
+	}
+	| "STR"
+	{
+		let v = $1.map_err(|_| ())?;
+		let str = parse_string($lexer.span_str(v.span())).unwrap();
+		Ok(ASTNode::STR(str))
 	}
 	| Variable
 	{
