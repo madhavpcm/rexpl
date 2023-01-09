@@ -13,10 +13,6 @@ use std::sync::Mutex;
 const MAX_REGISTERS: usize = 21;
 const XSM_OFFSET_STACK: usize = 4096;
 
-pub enum RegisterData {
-    INT(i64),
-    STR(String),
-}
 lazy_static! {
     static ref REGISTERS: Mutex<Vec<(bool, i64)>> = Mutex::new(vec![(false, 0); MAX_REGISTERS]);
     static ref VARIABLE_REGISTER_MAP: Mutex<HashMap<usize, usize>> = Mutex::new(HashMap::default());
@@ -37,6 +33,9 @@ pub fn get_reg() -> usize {
     }
     return MAX_REGISTERS.try_into().unwrap();
 }
+/*
+ * Error handler
+ */
 fn __exit_on_err(err: String) {
     log::error!("{}", err);
     std::process::exit(-1);
@@ -72,7 +71,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             if let Err(e) = writeln!(file, "MOV R{},{}", register, s) {
                 log::error!("[code_gen] Write Error to file : {}", e);
             }
-            registers[register].1 = s.clone();
+            registers[register].1 = 0;
             register
         }
         ASTNode::INT(n) => {

@@ -477,6 +477,7 @@ Expr -> Result<ASTNode,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let str = parse_string($lexer.span_str(v.span())).unwrap();
+		log::info!("String detected: {}",str);
 		Ok(ASTNode::STR(str))
 	}
 	| Variable
