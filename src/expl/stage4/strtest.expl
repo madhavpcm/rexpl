@@ -1,0 +1,21 @@
+decl
+	int a;
+	int b;
+	str c;
+enddecl;
+begin
+read(a);
+c="abcd";
+
+while ( a < 30 ) do
+	read(b);
+	while ( b < 34 ) do
+		if( b > a) then
+			break;
+		endif;
+		read(b);
+	endwhile;
+	read(a);
+endwhile;
+write(c);
+end;

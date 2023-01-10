@@ -5,7 +5,7 @@ use lrpar::lrpar_mod;
 use std::{
     env,
     fs::File,
-    io::{stderr, Read, Write},
+    io::{Read, Write},
     process,
 };
 
@@ -23,7 +23,7 @@ fn read_file(path: &str) -> String {
     let mut f = match File::open(path) {
         Ok(r) => r,
         Err(e) => {
-            writeln!(stderr(), "Can't open file {}: {}", path, e).ok();
+            log::error!("Can't open file {}: {}", path, e);
             process::exit(1);
         }
     };
@@ -36,14 +36,15 @@ fn main() {
     let lexerdef = lexer_l::lexerdef();
     let args: Vec<String> = env::args().collect();
 
-    Builder::from_env(Env::default().default_filter_or("info"))
+    // Log formatting
+    Builder::from_env(Env::default().default_filter_or("trace"))
         .format(|buf, record| {
             let mut style = buf.style();
             style.set_color(match record.level() {
                 log::Level::Error => env_logger::fmt::Color::Red,
                 log::Level::Warn => env_logger::fmt::Color::Yellow,
                 log::Level::Info => env_logger::fmt::Color::Blue,
-                log::Level::Trace => env_logger::fmt::Color::White,
+                log::Level::Trace => env_logger::fmt::Color::Green,
                 log::Level::Debug => env_logger::fmt::Color::Magenta,
             });
             writeln!(buf, "[{}] {}", style.value(record.level()), record.args())

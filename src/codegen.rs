@@ -33,9 +33,7 @@ pub fn get_reg() -> usize {
     }
     return MAX_REGISTERS.try_into().unwrap();
 }
-/*
- * Error handler
- */
+// * Error handler
 fn __exit_on_err(err: String) {
     log::error!("{}", err);
     std::process::exit(-1);
@@ -78,7 +76,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
             if let Err(e) = writeln!(file, "MOV R{},{}", register, n) {
-                eprintln!("[code_gen] Write Error to file : {}", e);
+                __exit_on_err(e.to_string());
             }
             registers[register].1 = *n;
             register
@@ -101,7 +99,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 temp_operand,
                 XSM_OFFSET_STACK + vardetails.varid
             ) {
-                eprintln!("[code_gen] Write Error to file : {}", e);
+                __exit_on_err(e.to_string());
             }
             hashmap.insert(temp_register, XSM_OFFSET_STACK + vardetails.varid);
             result
@@ -120,7 +118,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             let result = match op {
                 ASTNodeType::Gt => {
                     if let Err(e) = writeln!(file, "GT {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 > registers[right_register].1)
                         .try_into()
@@ -134,7 +132,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Lt => {
                     if let Err(e) = writeln!(file, "LT {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 < registers[right_register].1)
                         .try_into()
@@ -148,7 +146,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Gte => {
                     if let Err(e) = writeln!(file, "GTE {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 >= registers[right_register].1)
                         .try_into()
@@ -162,7 +160,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Lte => {
                     if let Err(e) = writeln!(file, "LTE {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 <= registers[right_register].1)
                         .try_into()
@@ -176,7 +174,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Ee => {
                     if let Err(e) = writeln!(file, "EQ {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 == registers[right_register].1)
                         .try_into()
@@ -190,7 +188,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Ne => {
                     if let Err(e) = writeln!(file, "NE {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 != registers[right_register].1)
                         .try_into()
@@ -204,7 +202,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Plus => {
                     if let Err(e) = writeln!(file, "ADD {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = registers[left_register].1 + registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -216,7 +214,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Minus => {
                     if let Err(e) = writeln!(file, "SUB {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = registers[left_register].1 - registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -228,7 +226,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Star => {
                     if let Err(e) = writeln!(file, "MUL {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = registers[left_register].1 * registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -240,7 +238,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 }
                 ASTNodeType::Slash => {
                     if let Err(e) = writeln!(file, "DIV {}, {}", left_operand, right_operand) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     let result: i64 = registers[left_register].1 / registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -253,12 +251,11 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                 ASTNodeType::Equals => {
                     let mut hashmap = VARIABLE_REGISTER_MAP.lock().unwrap();
                     if hashmap.contains_key(&left_register) == false {
-                        eprintln!("[code_gen] Too many variables to handle");
-                        return 1;
+                        __exit_on_err("Out of registers".to_owned());
                     }
                     registers[left_register] = registers[right_register];
                     if let Err(e) = writeln!(file, "MOV R{},R{}", left_register, right_register) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     if let Err(e) = writeln!(
                         file,
@@ -266,7 +263,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
                         hashmap.get(&left_register).unwrap(),
                         left_register
                     ) {
-                        eprintln!("[code_gen] Write Error to file : {}", e);
+                        __exit_on_err(e.to_string());
                     }
                     std::mem::drop(registers);
                     for k in hashmap.keys() {
@@ -326,7 +323,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             let result: usize = __code_gen(expr, file).try_into().unwrap();
             //Generate code for the expression
             if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l1) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //Free the register
             free_reg(result);
@@ -336,15 +333,15 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             //result is 0 as xif is a stmtlist
             //Jmp to L2 if its else case
             if let Err(e) = writeln!(file, "JMP L{}", l2) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //add label count for exit case
             if let Err(e) = writeln!(file, "L{}:", l1) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             __code_gen(xelse, file);
             if let Err(e) = writeln!(file, "L{}:", l2) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             0
         }
@@ -364,7 +361,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             let l1 = label_count.clone();
             //Create a new label
             if let Err(e) = writeln!(file, "L{}:", l1) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             (*label_count) += 1;
 
@@ -379,7 +376,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             let result: usize = __code_gen(expr, file).try_into().unwrap();
             //Generate code for the expression
             if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l2) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //Free the register
             free_reg(result);
@@ -392,11 +389,11 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             while_tracker.pop();
             while_tracker.pop();
             if let Err(e) = writeln!(file, "JMP L{}", l1) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //add label count for exit case
             if let Err(e) = writeln!(file, "L{}:", l2) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //increment label_count
             0
@@ -417,7 +414,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             let result: usize = __code_gen(expr, file).try_into().unwrap();
             //Generate code for the expression
             if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l1) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //Free the register
             free_reg(result);
@@ -425,7 +422,7 @@ fn __code_gen(root: &ASTNode, mut file: &File) -> usize {
             __code_gen(xif, file);
             //result is 0 as xif is a stmtlist
             if let Err(e) = writeln!(file, "L{}:", l1) {
-                eprintln!("[code_gen] wrerror : {}", e);
+                __exit_on_err(e.to_string());
             }
             //increment label_count
             0
@@ -461,7 +458,7 @@ fn __header_gen(mut file: &File) {
         "0\n2056\n0\n0\n0\n0\n0\n0\nMOV SP,{}\nMOV BP,SP",
         4095 + gst.len()
     ) {
-        eprintln!("[code_gen] Write error : {}", e);
+        __exit_on_err(e.to_string());
     }
 }
 
@@ -471,7 +468,7 @@ fn __header_gen(mut file: &File) {
 fn __xsm_write_syscall(mut file: &File, var: usize) {
     let register = get_reg();
     if let Err(e) = writeln!(file, "MOV R{},\"Write\"\nPUSH R{}\nMOV R{},-2\nPUSH R{}\nMOV R{},R{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
-        eprintln!("[code_gen] Write error : {}", e);
+        __exit_on_err(e.to_string());
     }
     free_reg(register);
 }
@@ -482,7 +479,7 @@ fn __xsm_write_syscall(mut file: &File, var: usize) {
 fn __xsm_read_syscall(mut file: &File, var: usize) {
     let register = get_reg();
     if let Err(e) = writeln!(file, "MOV R{},\"Read\"\nPUSH R{}\nMOV R{},-1\nPUSH R{}\nMOV R{},{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
-        eprintln!("[code_gen] Write error : {}", e);
+        __exit_on_err(e.to_string());
     }
     free_reg(register);
 }
@@ -493,7 +490,7 @@ fn __xsm_read_syscall(mut file: &File, var: usize) {
 fn __xsm_exit_syscall(mut file: &File) {
     let register = get_reg();
     if let Err(e) = writeln!(file, "INT 10") {
-        eprintln!("[code_gen] Write error : {}", e);
+        __exit_on_err(e.to_string());
     }
     free_reg(register);
 }
@@ -512,14 +509,14 @@ pub fn code_gen(root: &ASTNode, filename: String) -> usize {
             __header_gen(&file);
             let result: usize = __code_gen(root, &file);
             if let Err(e) = writeln!(file, "PUSH R{}", result) {
-                eprintln!("[code_gen] Write error : {}", e);
+                __exit_on_err(e.to_string());
             }
             __xsm_exit_syscall(&file);
-            println!("Generated Object file: {}", filename.as_str());
+            log::trace!("Generated Object file: {}", filename.as_str());
             result
         }
         Err(e) => {
-            eprintln!("[code_gen] Error opening output file : {}", e);
+            __exit_on_err(e.to_string());
             1
         }
     }

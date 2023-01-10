@@ -125,6 +125,8 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
         .open(filename.to_owned() + ".xsm")
         .expect("[linker] xsm file write error");
 
+    f.set_len(0)
+        .expect("[linker] Error truncating existing file");
     // Pass 3, replace label with address and write to new file
     for line in input.lines() {
         let mut flag: bool = false;
@@ -142,6 +144,8 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
             writeln!(f, "{}", line).expect("[linker] xsm file write error");
         }
     }
+
+    log::trace!("Generated XSM Assembly: {}.xsm", filename);
 
     Ok(false)
 }

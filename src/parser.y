@@ -245,11 +245,22 @@ OutputStmt -> Result<ASTNode, ()>:
 AssgStmt -> Result<ASTNode, ()>:
 	Variable '=' Expr ';'
 	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let lhs = $1?;
+		let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Equals,
             exprtype : ASTExprType::Null,
-			lhs : Box::new($1?),
-			rhs : Box::new($3?),
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
 		})
 	}
 	;
