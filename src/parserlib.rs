@@ -1,6 +1,6 @@
 use lazy_static::lazy_static; // 1.4.0
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::sync::Mutex;
 
 lazy_static! {
@@ -9,11 +9,13 @@ lazy_static! {
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
 }
 
+#[derive(Copy, Debug, Clone)]
 pub struct Variable {
     pub vartype: ASTExprType,
     pub varid: usize,
+    pub varsize: usize,
 }
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ASTNodeType {
     Plus,
     Minus,
@@ -34,7 +36,19 @@ pub enum ASTNodeType {
     Ne,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone)]
+impl std::fmt::Display for ASTExprType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            ASTExprType::Int => write!(f, "int_t"),
+            ASTExprType::String => write!(f, "str_t"),
+            ASTExprType::Bool => write!(f, "bool_t"),
+            _ => {
+                write!(f, "Node")
+            }
+        }
+    }
+}
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum ASTExprType {
     Int,
     String,
@@ -42,21 +56,28 @@ pub enum ASTExprType {
     Null,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ASTError {
     TypeError(String),
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum VarList {
-    Node { var: String, next: Box<VarList> },
+    Node {
+        var: String,
+        size: usize,
+        next: Box<VarList>,
+    },
     Null,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum ASTNode {
     INT(i64),
     STR(String),
-    VAR(String),
+    VAR {
+        name: String,
+        index1: Box<ASTNode>,
+    },
     BinaryNode {
         op: ASTNodeType,
         exprtype: ASTExprType,
@@ -104,6 +125,18 @@ pub fn parse_int(s: &str) -> Result<i64, ()> {
     }
 }
 
+/*
+ * Convert string to usize
+ */
+pub fn parse_usize(s: &str) -> Result<usize, ()> {
+    match s.parse::<usize>() {
+        Ok(val) => Ok(val),
+        Err(_) => {
+            eprintln!("{} cannot be represented as a i64", s);
+            Err(())
+        }
+    }
+}
 pub fn parse_string(s: &str) -> Result<String, ()> {
     Ok(s.to_owned())
 }
@@ -130,9 +163,10 @@ pub fn validate_ast_binary_node(
             }
         }
         ASTNode::INT(_a) => true,
-        ASTNode::VAR(var) => {
+        ASTNode::VAR { name, index1: _ } => {
             let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(value) = hashmap.get(var.as_str()) {
+            if let Some(value) = hashmap.get(name.as_str()) {
+                log::info!("vartype {}", value.vartype);
                 if value.vartype != ASTExprType::Int {
                     false
                 } else {
@@ -158,9 +192,9 @@ pub fn validate_ast_binary_node(
             }
         }
         ASTNode::INT(_a) => true,
-        ASTNode::VAR(var) => {
+        ASTNode::VAR { name, index1: _ } => {
             let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(value) = hashmap.get(var.as_str()) {
+            if let Some(value) = hashmap.get(name.as_str()) {
                 if value.vartype != ASTExprType::Int {
                     false
                 } else {
@@ -189,10 +223,30 @@ pub fn validate_condition_expression(expr: &ASTNode) -> Result<bool, ()> {
             _ => false,
         },
         ASTNode::INT(_a) => false,
-        ASTNode::VAR(_a) => false,
+        ASTNode::VAR { name: _, index1: _ } => false,
         _ => false,
     };
 
+    return Ok(result);
+}
+/*
+ * Function to check if index is valid
+ */
+pub fn validate_index(expr: &ASTNode) -> Result<bool, ()> {
+    let result: bool = match expr {
+        ASTNode::BinaryNode {
+            op: _,
+            exprtype,
+            lhs: _,
+            rhs: _,
+        } => match exprtype {
+            ASTExprType::Int => true,
+            _ => false,
+        },
+        ASTNode::INT(_a) => true,
+        ASTNode::VAR { name: _, index1: _ } => true,
+        _ => false,
+    };
     return Ok(result);
 }
 /*
@@ -211,7 +265,7 @@ pub fn __gentypehash(declnode: &ASTNode) {
 
             loop {
                 match ptr {
-                    VarList::Node { var, next } => {
+                    VarList::Node { var, size, next } => {
                         if gst.contains_key(&var) == true {
                             log::error!("Variable : [{}] is already declared", var);
                             std::process::exit(1);
@@ -221,9 +275,10 @@ pub fn __gentypehash(declnode: &ASTNode) {
                             Variable {
                                 vartype: var_type.clone(),
                                 varid: var_id.clone(),
+                                varsize: size,
                             },
                         );
-                        *var_id = *var_id + 1;
+                        *var_id = *var_id + size;
                         ptr = *next;
                     }
                     VarList::Null => {

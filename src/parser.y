@@ -88,17 +88,50 @@ VarList -> Result<VarList,()>:
 	{
 		let v = $3.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
 		Ok(VarList::Node{
 			var: var,
+			size: 1,
 			next: Box::new($1?),
+		})
+	}
+	| VarList ',' "VAR" "[" "INT" "]"
+	{
+		let v = $3.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let v = $5.map_err(|_| ())?;
+        let varsize = parse_usize($lexer.span_str(v.span())).unwrap();
+
+		Ok(VarList::Node{
+			var: var,
+			size: varsize,
+			next: Box::new($1?),
+		})
+	
+	}
+	| "VAR" "[" "INT" "]"
+	{
+		let v = $1.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let v = $3.map_err(|_| ())?;
+        let varsize = parse_usize($lexer.span_str(v.span())).unwrap();
+
+		Ok(VarList::Node{
+			var: var,
+			size: varsize,
+			next: Box::new(VarList::Null),
 		})
 	}
 	| "VAR" 
 	{
 		let v = $1.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
 		Ok(VarList::Node{
 			var: var,
+			size: 1,
 			next: Box::new(VarList::Null),
 		})
 	}
@@ -251,7 +284,7 @@ AssgStmt -> Result<ASTNode, ()>:
 		let lhs = $1?;
 		let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Bool) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -502,7 +535,28 @@ Variable -> Result<ASTNode,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-		Ok(ASTNode::VAR(var))
+		Ok(ASTNode::VAR{
+			name: var,
+			index1: Box::new(ASTNode::Null),
+		})
+	}
+	| "VAR" "[" Expr "]"
+	{
+		let v = $1.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let expr = $3?;
+		if validate_index(&expr) == Ok(false) {
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("Invalid Expression while indexing : ".to_owned() + var.as_str()),
+            });
+		}
+		
+		Ok(ASTNode::VAR{
+			name: var,
+			index1: Box::new(expr),
+		})
+
 	}
 	;
 %%
