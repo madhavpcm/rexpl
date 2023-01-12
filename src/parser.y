@@ -25,7 +25,7 @@
 %token "="
 %nonassoc ">" "<" ">=" '<=' "==" "!="
 %left '+' '-'
-%left '*' '/'
+%left '*' '/' '%'
 
 %%
 DeclBlock -> Result<ASTNode,()>:
@@ -502,6 +502,27 @@ Expr -> Result<ASTNode,()>:
 
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Slash,
+			exprtype : ASTExprType::Int,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| Expr '%' Expr
+	{
+		let v = $2.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+        let lhs = $1?;
+        let rhs = $3?;
+
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Mod,
 			exprtype : ASTExprType::Int,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),

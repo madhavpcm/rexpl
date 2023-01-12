@@ -21,6 +21,7 @@ pub enum ASTNodeType {
     Minus,
     Star,
     Slash,
+    Mod,
 
     Equals,
 
@@ -156,7 +157,9 @@ pub fn validate_ast_binary_node(
             lhs: _,
             rhs: _,
         } => {
-            if sign == exprtype {
+            if exprtype == &ASTExprType::Int {
+                true
+            } else if sign == exprtype {
                 true
             } else {
                 false
@@ -185,7 +188,9 @@ pub fn validate_ast_binary_node(
             lhs: _,
             rhs: _,
         } => {
-            if sign == exprtype {
+            if exprtype == &ASTExprType::Int {
+                true
+            } else if sign == exprtype {
                 true
             } else {
                 false

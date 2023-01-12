@@ -259,7 +259,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "GTE {}, {}", left_operand, right_operand) {
+                    if let Err(e) = writeln!(file, "GE {}, {}", left_operand, right_operand) {
                         __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 >= registers[right_register].1)
@@ -279,7 +279,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "LTE {}, {}", left_operand, right_operand) {
+                    if let Err(e) = writeln!(file, "LE {}, {}", left_operand, right_operand) {
                         __exit_on_err(e.to_string());
                     }
                     let result: i64 = (registers[left_register].1 <= registers[right_register].1)
@@ -397,6 +397,21 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         __exit_on_err(e.to_string());
                     }
                     let result: i64 = registers[left_register].1 / registers[right_register].1;
+                    let lower_register = min(left_register, right_register);
+                    registers[lower_register].1 = result;
+                    // release mutex for global array so that register can be freed
+                    std::mem::drop(registers);
+                    free_reg(left_register + right_register - lower_register);
+                    lower_register
+                }
+                ASTNodeType::Mod => {
+                    let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
+                    let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
+                    let mut registers = REGISTERS.lock().unwrap();
+                    if let Err(e) = writeln!(file, "MOD R{}, R{}", left_register, right_register) {
+                        __exit_on_err(e.to_string());
+                    }
+                    let result: i64 = registers[left_register].1 % registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
                     // release mutex for global array so that register can be freed
@@ -589,10 +604,15 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
 fn __header_gen(mut file: &File) {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     log::info!("Global Symbol Table Size : {}", gst.len());
+    let mut baseaddr = 4095;
+    for (_k, v) in gst.iter() {
+        println!("{} {} {}", baseaddr, _k, v.varsize);
+        baseaddr = baseaddr + v.varsize;
+    }
     if let Err(e) = writeln!(
         file,
         "0\n2056\n0\n0\n0\n0\n0\n0\nMOV SP,{}\nMOV BP,SP",
-        4095 + gst.len()
+        baseaddr
     ) {
         __exit_on_err(e.to_string());
     }

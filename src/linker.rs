@@ -145,6 +145,9 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
         }
     }
 
+    for (k, v) in label_map.iter() {
+        log::info!(" Label {} -> {}", k, v);
+    }
     log::trace!("Generated XSM Assembly: {}.xsm", filename);
 
     Ok(false)
