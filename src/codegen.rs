@@ -25,7 +25,7 @@ lazy_static! {
  */
 pub fn get_reg() -> usize {
     let mut register = REGISTERS.lock().unwrap();
-    for i in 0..MAX_REGISTERS {
+    for i in 10..MAX_REGISTERS {
         //lowest register number free is returned
         if register[i].0 == false {
             register[i].0 = true;
@@ -82,7 +82,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             registers[register].1 = *n;
             register
         }
-        ASTNode::VAR { name, index1 } => {
+        ASTNode::VAR { name, indices } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
             if gst.contains_key(name) == false {
                 __exit_on_err("Variable : [".to_owned() + name.as_str() + "] is not declared");
@@ -93,117 +93,158 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 .clone();
 
             std::mem::drop(gst);
+            let baseaddrreg = get_reg();
 
-            match **index1 {
-                ASTNode::STR(_) => {
-                    __exit_on_err(
-                        "str Type cannot be used to index variable [".to_owned() + name + "]",
-                    );
-                }
-                ASTNode::INT(num) => {
-                    let register = get_reg();
-                    let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "MOV R{},{}", register, num) {
-                        __exit_on_err(e.to_string());
-                    }
-                    registers[register].1 = num
-                        + i64::try_from(XSM_OFFSET_STACK).unwrap()
-                        + i64::try_from(vardetails.varid).unwrap();
+            let mut registers = REGISTERS.lock().unwrap();
+            registers[baseaddrreg].1 =
+                i64::try_from(XSM_OFFSET_STACK).unwrap() + i64::try_from(vardetails.varid).unwrap();
+            std::mem::drop(registers);
 
-                    return register;
-                }
-                ASTNode::VAR { name: _, index1: _ } => {
-                    let baseaddrreg = get_reg();
+            if let Err(e) = writeln!(
+                file,
+                "MOV R{}, {}",
+                baseaddrreg,
+                XSM_OFFSET_STACK + vardetails.varid
+            ) {
+                __exit_on_err(e.to_string());
+            }
 
-                    if let Err(e) = writeln!(
-                        file,
-                        "MOV R{}, {}",
-                        baseaddrreg,
-                        XSM_OFFSET_STACK + vardetails.varid
-                    ) {
-                        __exit_on_err(e.to_string());
-                    }
-
-                    let offsetreg = __code_gen(&index1, file, false);
-
-                    let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
-                        __exit_on_err(e.to_string());
-                    }
-                    if refr == false {
-                        if let Err(e) = writeln!(file, "MOV R{}, [R{}]", baseaddrreg, baseaddrreg) {
-                            __exit_on_err(e.to_string());
-                        }
-                    }
-                    registers[baseaddrreg].1 = i64::try_from(XSM_OFFSET_STACK).unwrap()
-                        + i64::try_from(vardetails.varid).unwrap()
-                        + registers[offsetreg].1;
-
-                    std::mem::drop(registers);
-                    free_reg(offsetreg);
-                    return baseaddrreg;
-                }
-                //Normal case
-                ASTNode::Null => {
-                    let baseaddrreg = get_reg();
-
-                    let mut registers = REGISTERS.lock().unwrap();
-                    registers[baseaddrreg].1 = i64::try_from(XSM_OFFSET_STACK).unwrap()
-                        + i64::try_from(vardetails.varid).unwrap();
-                    if refr == false {
-                        if let Err(e) = writeln!(
-                            file,
-                            "MOV R{}, [{}]",
-                            baseaddrreg,
-                            XSM_OFFSET_STACK + vardetails.varid
-                        ) {
-                            __exit_on_err(e.to_string());
-                        }
-                    } else {
-                        if let Err(e) = writeln!(
-                            file,
-                            "MOV R{}, {}",
-                            baseaddrreg,
-                            XSM_OFFSET_STACK + vardetails.varid
-                        ) {
-                            __exit_on_err(e.to_string());
-                        }
-                    }
-                    return baseaddrreg;
-                }
-                ASTNode::BinaryNode {
-                    op: _,
-                    exprtype,
-                    lhs: _,
-                    rhs: _,
-                } => {
-                    let temp_register = get_reg();
-                    if exprtype != ASTExprType::Int {
+            for i in 0..indices.len() {
+                match *indices[i] {
+                    ASTNode::STR(_) => {
                         __exit_on_err(
-                            "An expression of bool Type cannot be used to index variable ["
-                                .to_owned()
-                                + name
-                                + "]",
+                            "str Type cannot be used to index variable [".to_owned() + name + "]",
                         );
                     }
-                    if let Err(e) = writeln!(
-                        file,
-                        "MOV R{}, {}",
-                        temp_register,
-                        XSM_OFFSET_STACK + vardetails.varid
-                    ) {
-                        __exit_on_err(e.to_string());
+                    ASTNode::INT(num) => {
+                        let offsetreg = get_reg();
+
+                        if let Err(e) = writeln!(file, "MOV R{},{}", offsetreg, num) {
+                            __exit_on_err(e.to_string());
+                        }
+
+                        if i != indices.len() - 1 {
+                            let indexmulreg = get_reg();
+                            let mut registers = REGISTERS.lock().unwrap();
+
+                            if let Err(e) =
+                                writeln!(file, "MOV R{}, {}", indexmulreg, vardetails.varindices[i])
+                            {
+                                __exit_on_err(e.to_string());
+                            }
+
+                            if let Err(e) = writeln!(file, "MUL R{}, R{}", offsetreg, indexmulreg) {
+                                __exit_on_err(e.to_string());
+                            }
+
+                            registers[offsetreg].1 *=
+                                i64::try_from(vardetails.varindices[i]).unwrap();
+
+                            std::mem::drop(registers);
+                            free_reg(indexmulreg);
+                        }
+
+                        let mut registers = REGISTERS.lock().unwrap();
+                        if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
+                            __exit_on_err(e.to_string());
+                        }
+                        registers[baseaddrreg].1 += registers[offsetreg].1;
+
+                        std::mem::drop(registers);
+                        free_reg(offsetreg);
                     }
-                    let evalreg = __code_gen(index1, file, false);
-                    if let Err(e) = writeln!(file, "ADD R{}, R{}", temp_register, evalreg) {
-                        __exit_on_err(e.to_string());
+                    ASTNode::VAR {
+                        name: _,
+                        indices: _,
+                    } => {
+                        let offsetreg = __code_gen(&*indices[i], file, false);
+
+                        if i != indices.len() - 1 {
+                            let indexmulreg = get_reg();
+                            let mut registers = REGISTERS.lock().unwrap();
+
+                            if let Err(e) =
+                                writeln!(file, "MOV R{}, {}", indexmulreg, vardetails.varindices[i])
+                            {
+                                __exit_on_err(e.to_string());
+                            }
+
+                            if let Err(e) = writeln!(file, "MUL R{}, R{}", offsetreg, indexmulreg) {
+                                __exit_on_err(e.to_string());
+                            }
+
+                            registers[offsetreg].1 *=
+                                i64::try_from(vardetails.varindices[i]).unwrap();
+
+                            std::mem::drop(registers);
+                            free_reg(indexmulreg);
+                        }
+                        let mut registers = REGISTERS.lock().unwrap();
+
+                        if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
+                            __exit_on_err(e.to_string());
+                        }
+                        registers[baseaddrreg].1 += registers[offsetreg].1;
+
+                        std::mem::drop(registers);
+                        free_reg(offsetreg);
                     }
-                    free_reg(evalreg);
-                    return temp_register;
+                    //Normal case
+                    ASTNode::BinaryNode {
+                        op: _,
+                        exprtype,
+                        lhs: _,
+                        rhs: _,
+                    } => {
+                        if exprtype != ASTExprType::Int {
+                            __exit_on_err(
+                                "An expression of bool Type cannot be used to index variable ["
+                                    .to_owned()
+                                    + name
+                                    + "]",
+                            );
+                        }
+                        let offsetreg = __code_gen(&*indices[i], file, false);
+
+                        if i != indices.len() - 1 {
+                            let indexmulreg = get_reg();
+                            let mut registers = REGISTERS.lock().unwrap();
+
+                            if let Err(e) =
+                                writeln!(file, "MOV R{}, {}", indexmulreg, vardetails.varindices[i])
+                            {
+                                __exit_on_err(e.to_string());
+                            }
+
+                            if let Err(e) = writeln!(file, "MUL R{}, R{}", offsetreg, indexmulreg) {
+                                __exit_on_err(e.to_string());
+                            }
+
+                            registers[offsetreg].1 *=
+                                i64::try_from(vardetails.varindices[i]).unwrap();
+
+                            std::mem::drop(registers);
+                            free_reg(indexmulreg);
+                        }
+
+                        let mut registers = REGISTERS.lock().unwrap();
+                        if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
+                            __exit_on_err(e.to_string());
+                        }
+                        registers[baseaddrreg].1 += registers[offsetreg].1;
+
+                        std::mem::drop(registers);
+                        free_reg(offsetreg);
+                    }
+                    _ => __exit_on_err("Invalid token as index".to_string()),
+                };
+            }
+            if refr == false {
+                if let Err(e) = writeln!(file, "MOV R{}, [R{}]", baseaddrreg, baseaddrreg) {
+                    __exit_on_err(e.to_string());
                 }
-                _ => __exit_on_err("Invalid token as index".to_string()),
-            };
-            0
+            }
+            return baseaddrreg;
         }
         ASTNode::BinaryNode {
             op,
@@ -606,8 +647,11 @@ fn __header_gen(mut file: &File) {
     log::info!("Global Symbol Table Size : {}", gst.len());
     let mut baseaddr = 4095;
     for (_k, v) in gst.iter() {
-        println!("{} {} {}", baseaddr, _k, v.varsize);
-        baseaddr = baseaddr + v.varsize;
+        let mut size = 1;
+        for index in &v.varindices {
+            size *= index;
+        }
+        baseaddr = baseaddr + size;
     }
     if let Err(e) = writeln!(
         file,
@@ -655,12 +699,17 @@ fn __print_gst() {
 
     log::info!("Global symbol table has {} symbols", gst.len());
     for (k, v) in gst.iter() {
+        let mut size = 1;
+        for index in &v.varindices {
+            size *= index;
+        }
         log::info!(
-            "GST Entry [{}] : {} | {} | {}",
+            "GST Entry [{}] : {} | {} | {} | {}",
             k,
             v.varid,
-            v.varsize,
-            v.vartype
+            v.vartype,
+            v.varindices.len(),
+            size
         );
     }
 }

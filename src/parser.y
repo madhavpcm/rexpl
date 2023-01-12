@@ -87,25 +87,28 @@ VarList -> Result<VarList,()>:
 	VarList ',' "VAR" 
 	{
 		let v = $3.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
 
 		Ok(VarList::Node{
-			var: var,
-			size: 1,
+			var: var_,
+			indices: Vec::default(),
 			next: Box::new($1?),
 		})
 	}
 	| VarList ',' "VAR" "[" "INT" "]"
 	{
 		let v = $3.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
 
 		let v = $5.map_err(|_| ())?;
-        let varsize = parse_usize($lexer.span_str(v.span())).unwrap();
+        let i= parse_usize($lexer.span_str(v.span())).unwrap();
+
+        let mut indices_ :Vec<usize>= Vec::default();
+        indices_.push(i);
 
 		Ok(VarList::Node{
-			var: var,
-			size: varsize,
+			var: var_,
+			indices: indices_,
 			next: Box::new($1?),
 		})
 	
@@ -113,27 +116,73 @@ VarList -> Result<VarList,()>:
 	| "VAR" "[" "INT" "]"
 	{
 		let v = $1.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
 
 		let v = $3.map_err(|_| ())?;
-        let varsize = parse_usize($lexer.span_str(v.span())).unwrap();
+        let i= parse_usize($lexer.span_str(v.span())).unwrap();
+
+        let mut indices_ :Vec<usize>= Vec::default();
+        indices_.push(i);
 
 		Ok(VarList::Node{
-			var: var,
-			size: varsize,
+			var: var_,
+			indices: indices_,
 			next: Box::new(VarList::Null),
 		})
 	}
 	| "VAR" 
 	{
 		let v = $1.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
 
 		Ok(VarList::Node{
-			var: var,
-			size: 1,
+			var: var_,
+			indices: Vec::default(),
 			next: Box::new(VarList::Null),
 		})
+	}
+	| VarList ',' "VAR" "[" "INT" "]" "[" "INT" "]"
+	{
+		let v = $3.map_err(|_| ())?;
+		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let v = $5.map_err(|_| ())?;
+        let i= parse_usize($lexer.span_str(v.span())).unwrap();
+
+		let v = $8.map_err(|_| ())?;
+        let j= parse_usize($lexer.span_str(v.span())).unwrap();
+
+        let mut indices_ : Vec<usize> = Vec::default();
+        indices_.push(i);
+        indices_.push(j);
+
+		Ok(VarList::Node{
+			var: var_,
+			indices: indices_,
+			next: Box::new($1?),
+		})
+	}
+	| "VAR" "[" "INT" "]" "[" "INT" "]"
+	{
+		let v = $1.map_err(|_| ())?;
+		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let v = $3.map_err(|_| ())?;
+        let i= parse_usize($lexer.span_str(v.span())).unwrap();
+
+		let v = $6.map_err(|_| ())?;
+        let j= parse_usize($lexer.span_str(v.span())).unwrap();
+
+        let mut indices_ : Vec<usize> = Vec::default();
+        indices_.push(i);
+        indices_.push(j);
+
+		Ok(VarList::Node{
+			var: var_,
+			indices: indices_,
+			next: Box::new(VarList::Null),
+		})
+
 	}
     ;
 
@@ -558,7 +607,7 @@ Variable -> Result<ASTNode,()>:
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
 		Ok(ASTNode::VAR{
 			name: var,
-			index1: Box::new(ASTNode::Null),
+			indices: Vec::default(),
 		})
 	}
 	| "VAR" "[" Expr "]"
@@ -573,10 +622,44 @@ Variable -> Result<ASTNode,()>:
             });
 		}
 		
+        let mut ind : Vec<Box<ASTNode>> = Vec::default();
+        ind.push(Box::new(expr));
+
 		Ok(ASTNode::VAR{
 			name: var,
-			index1: Box::new(expr),
+			indices: ind,
 		})
+
+	}
+	| "VAR" "[" Expr "]" "[" Expr "]"
+	{
+		let v = $1.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let i = $3?;
+		let j = $6?;
+
+		if validate_index(&i) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("Invalid Expression while indexing : ".to_owned() + var.as_str()),
+            });
+		}
+
+		if validate_index(&j) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("Invalid Expression while indexing : ".to_owned() + var.as_str()),
+            });
+		}
+
+        let mut ind : Vec<Box<ASTNode>> = Vec::default();
+        ind.push(Box::new(i));
+        ind.push(Box::new(j));
+		Ok(ASTNode::VAR{
+			name: var,
+			indices:ind 
+		})
+
+
 
 	}
 	;

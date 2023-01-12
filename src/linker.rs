@@ -1,7 +1,7 @@
 use lrlex::DefaultLexeme;
 use lrpar::{LexError, Lexeme, Lexer, Span};
 use regex::Regex;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{stderr, Read, Write};
 
@@ -47,8 +47,8 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
     let label_regex = Regex::new(r"L(\d+)").unwrap();
 
     //Symbol table for <label> <address> pair
-    let mut label_map: HashMap<String, usize>;
-    label_map = HashMap::default();
+    let mut label_map: BTreeMap<String, usize>;
+    label_map = BTreeMap::default();
 
     //we need the lexemes to be in reverse order to avoid index out of bounds when removing
     let mut lexerrev: Vec<Result<DefaultLexeme<u32>, LexError>> = Vec::default();
@@ -130,13 +130,14 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
     // Pass 3, replace label with address and write to new file
     for line in input.lines() {
         let mut flag: bool = false;
-        for (k, v) in label_map.iter() {
+        for (k, v) in label_map.iter().rev() {
             //find if there is a label
             if line.find(k.as_str()) != None {
                 //replace with address in hashmap
                 writeln!(f, "{}", line.replace(k.as_str(), v.to_string().as_str()))
                     .expect("[linker] xsm file write error");
                 flag = true;
+                log::warn!("{}", line.replace(k.as_str(), v.to_string().as_str()));
                 break;
             }
         }

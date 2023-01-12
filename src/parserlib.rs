@@ -9,11 +9,11 @@ lazy_static! {
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
 }
 
-#[derive(Copy, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Variable {
     pub vartype: ASTExprType,
     pub varid: usize,
-    pub varsize: usize,
+    pub varindices: Vec<usize>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ASTNodeType {
@@ -65,7 +65,7 @@ pub enum ASTError {
 pub enum VarList {
     Node {
         var: String,
-        size: usize,
+        indices: Vec<usize>,
         next: Box<VarList>,
     },
     Null,
@@ -77,7 +77,7 @@ pub enum ASTNode {
     STR(String),
     VAR {
         name: String,
-        index1: Box<ASTNode>,
+        indices: Vec<Box<ASTNode>>,
     },
     BinaryNode {
         op: ASTNodeType,
@@ -166,10 +166,9 @@ pub fn validate_ast_binary_node(
             }
         }
         ASTNode::INT(_a) => true,
-        ASTNode::VAR { name, index1: _ } => {
+        ASTNode::VAR { name, indices: _ } => {
             let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(value) = hashmap.get(name.as_str()) {
-                log::info!("vartype {}", value.vartype);
                 if value.vartype != ASTExprType::Int {
                     false
                 } else {
@@ -197,7 +196,7 @@ pub fn validate_ast_binary_node(
             }
         }
         ASTNode::INT(_a) => true,
-        ASTNode::VAR { name, index1: _ } => {
+        ASTNode::VAR { name, indices: _ } => {
             let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(value) = hashmap.get(name.as_str()) {
                 if value.vartype != ASTExprType::Int {
@@ -228,7 +227,10 @@ pub fn validate_condition_expression(expr: &ASTNode) -> Result<bool, ()> {
             _ => false,
         },
         ASTNode::INT(_a) => false,
-        ASTNode::VAR { name: _, index1: _ } => false,
+        ASTNode::VAR {
+            name: _,
+            indices: _,
+        } => false,
         _ => false,
     };
 
@@ -249,7 +251,10 @@ pub fn validate_index(expr: &ASTNode) -> Result<bool, ()> {
             _ => false,
         },
         ASTNode::INT(_a) => true,
-        ASTNode::VAR { name: _, index1: _ } => true,
+        ASTNode::VAR {
+            name: _,
+            indices: _,
+        } => true,
         _ => false,
     };
     return Ok(result);
@@ -270,7 +275,7 @@ pub fn __gentypehash(declnode: &ASTNode) {
 
             loop {
                 match ptr {
-                    VarList::Node { var, size, next } => {
+                    VarList::Node { var, indices, next } => {
                         if gst.contains_key(&var) == true {
                             log::error!("Variable : [{}] is already declared", var);
                             std::process::exit(1);
@@ -280,9 +285,13 @@ pub fn __gentypehash(declnode: &ASTNode) {
                             Variable {
                                 vartype: var_type.clone(),
                                 varid: var_id.clone(),
-                                varsize: size,
+                                varindices: indices.clone(),
                             },
                         );
+                        let mut size = 1;
+                        for i in indices {
+                            size = size * i;
+                        }
                         *var_id = *var_id + size;
                         ptr = *next;
                     }

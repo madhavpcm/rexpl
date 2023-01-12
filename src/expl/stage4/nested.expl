@@ -1,0 +1,13 @@
+decl
+	int arr[100] ,b;
+	int a;
+enddecl;
+begin
+	read(a);
+	b=0;
+	b=b+1;
+	arr[b+2]=1;
+	while ( b < a) do
+		read(arr[arr[b]]);
+	endwhile;
+end;
