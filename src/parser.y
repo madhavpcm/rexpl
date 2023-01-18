@@ -84,36 +84,65 @@ Type -> Result<ASTExprType, ()>:
 	;
 
 VarList -> Result<VarList,()>:
-	VarList ',' "VAR" 
+	VarList ',' VariableDef 
 	{
-		let v = $3.map_err(|_| ())?;
-		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-
-		Ok(VarList::Node{
-			var: var_,
-			indices: Vec::default(),
-			next: Box::new($1?),
-		})
+		let var = $3?;
+		match var {
+			VarList::Node { var,refr,indices,next}=> {
+				Ok(VarList::Node{
+					var:var,
+					refr:refr,
+					indices:indices,
+					next:Box::new($1?),
+				})
+			},
+			VarList::Null => {
+				Ok(VarList::Null)
+			}
+		}
 	}
-	| VarList ',' "VAR" "[" "INT" "]"
+	| VarList ',' '*' VariableDef
 	{
-		let v = $3.map_err(|_| ())?;
-		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-
-		let v = $5.map_err(|_| ())?;
-        let i= parse_usize($lexer.span_str(v.span())).unwrap();
-
-        let mut indices_ :Vec<usize>= Vec::default();
-        indices_.push(i);
-
-		Ok(VarList::Node{
-			var: var_,
-			indices: indices_,
-			next: Box::new($1?),
-		})
-	
+		let var = $4?;
+		match var {
+			VarList::Node { var,refr:_,indices,next}=> {
+				Ok(VarList::Node{
+					var:var,
+					refr:true,
+					indices:indices,
+					next:Box::new($1?),
+				})
+			},
+			VarList::Null => {
+				Ok(VarList::Null)
+			}
+		}
 	}
-	| "VAR" "[" "INT" "]"
+	| VariableDef 
+	{
+		$1
+	} 
+	| '*' VariableDef
+	{
+		let var = $2?;
+		match var {
+			VarList::Node { var,refr:_,indices,next}=> {
+				Ok(VarList::Node{
+					var:var,
+					refr:true,
+					indices:indices,
+					next:next
+				})
+			},
+			VarList::Null => {
+				Ok(VarList::Null)
+			}
+		}
+	}
+    ;
+
+VariableDef -> Result<VarList,()>:
+	"VAR" "[" "INT" "]"
 	{
 		let v = $1.map_err(|_| ())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
@@ -126,6 +155,7 @@ VarList -> Result<VarList,()>:
 
 		Ok(VarList::Node{
 			var: var_,
+			refr:false,
 			indices: indices_,
 			next: Box::new(VarList::Null),
 		})
@@ -137,29 +167,9 @@ VarList -> Result<VarList,()>:
 
 		Ok(VarList::Node{
 			var: var_,
+			refr:false,
 			indices: Vec::default(),
 			next: Box::new(VarList::Null),
-		})
-	}
-	| VarList ',' "VAR" "[" "INT" "]" "[" "INT" "]"
-	{
-		let v = $3.map_err(|_| ())?;
-		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-
-		let v = $5.map_err(|_| ())?;
-        let i= parse_usize($lexer.span_str(v.span())).unwrap();
-
-		let v = $8.map_err(|_| ())?;
-        let j= parse_usize($lexer.span_str(v.span())).unwrap();
-
-        let mut indices_ : Vec<usize> = Vec::default();
-        indices_.push(i);
-        indices_.push(j);
-
-		Ok(VarList::Node{
-			var: var_,
-			indices: indices_,
-			next: Box::new($1?),
 		})
 	}
 	| "VAR" "[" "INT" "]" "[" "INT" "]"
@@ -179,13 +189,12 @@ VarList -> Result<VarList,()>:
 
 		Ok(VarList::Node{
 			var: var_,
+			refr:false,
 			indices: indices_,
 			next: Box::new(VarList::Null),
 		})
-
 	}
-    ;
-
+	;	
 
 	
 WhileStmt -> Result<ASTNode, ()>:
@@ -194,7 +203,7 @@ WhileStmt -> Result<ASTNode, ()>:
         let expr = $3?;
         if validate_condition_expression(&expr) == Ok(false) {
             return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression".to_owned()),
+                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
             });
         }
         Ok(ASTNode::WhileNode{
@@ -211,7 +220,7 @@ IfStmt -> Result<ASTNode, ()>:
 
         if validate_condition_expression(&expr) == Ok(false) {
             return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression".to_owned()),
+                err : ASTError::TypeError("Expected a boolean expression in if then else".to_owned()),
             });
         }
         Ok(ASTNode::IfElseNode{
@@ -226,7 +235,7 @@ IfStmt -> Result<ASTNode, ()>:
 
         if validate_condition_expression(&expr) == Ok(false) {
             return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression".to_owned()),
+                err : ASTError::TypeError("Expected a boolean expression in if then".to_owned()),
             });
         }
         Ok(ASTNode::IfNode{
@@ -332,8 +341,44 @@ AssgStmt -> Result<ASTNode, ()>:
 
 		let lhs = $1?;
 		let rhs = $3?;
+		let mut Name="".to_owned();
+        let lhstype = getvartype(match lhs {
+            ASTNode::VAR {ref name, ref indices} => {
+				Name=name.clone();
+				&Name
+            }
+            _ => &Name
+        })?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
+        if validate_assg(&rhs,&lhstype) == Ok(false) {
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
+            });
+        }
+		Ok(ASTNode::BinaryNode{
+			op : ASTNodeType::Equals,
+            exprtype : ASTExprType::Null,
+			lhs : Box::new(lhs),
+			rhs : Box::new(rhs),
+		})
+	}
+	| '*' Variable '=' Expr ';'
+	{
+		let v = $3.map_err(|_| ())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+
+		let lhs = $2?;
+		let rhs = $4?;
+
+		let mut Name="".to_owned();
+        let lhstype = getvartype(match lhs {
+            ASTNode::VAR {ref name, ref indices} => {
+				Name=name.clone();
+				&Name
+            }
+            _ => &Name
+        })?;
+        if validate_assg(&rhs,&lhstype) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -522,7 +567,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::IntRef) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -543,7 +588,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::IntRef) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -564,7 +609,7 @@ Expr -> Result<ASTNode,()>:
         let lhs = $1?;
         let rhs = $3?;
 
-        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::Int) == Ok(false){
+        if validate_ast_binary_node(&lhs,&rhs,&ASTExprType::IntRef) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -594,13 +639,13 @@ Expr -> Result<ASTNode,()>:
 		log::info!("String detected: {}",str);
 		Ok(ASTNode::STR(str))
 	}
-	| Variable
+	| VariableExpr
 	{
 		$1
 	}
     ; 
 
-Variable -> Result<ASTNode,()>:
+Variable -> Result<ASTNode, ()>:
 	"VAR"
 	{
 		let v = $1.map_err(|_| ())?;
@@ -658,9 +703,41 @@ Variable -> Result<ASTNode,()>:
 			name: var,
 			indices:ind 
 		})
+	}
+	;
 
+VariableExpr -> Result<ASTNode,()>:
+	Variable
+	{
+		$1
+	}
+	| '&' Variable
+	{
+		let var = $2?;
 
+		if validate_var(&var) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("& can be used only on INT or STR types: ".to_owned()  ),
+            });
+		}
+		Ok(ASTNode::UnaryNode{
+			op: ASTNodeType::Ref,
+			ptr: Box::new(var),
+		})
+	}
+	| '*' Variable
+	{
+		let var = $2?;
 
+		if validate_refr(&var) == Ok(false){
+            return Ok(ASTNode::ErrorNode{ 
+                err : ASTError::TypeError("* can be used only on INT_PTR or STR_PTR types: ".to_owned()  ),
+            });
+		}
+		Ok(ASTNode::UnaryNode{
+			op: ASTNodeType::Deref,
+			ptr: Box::new(var),
+		})
 	}
 	;
 %%

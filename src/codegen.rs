@@ -492,6 +492,30 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 free_reg(variable);
                 0
             }
+            ASTNodeType::Ref => {
+                match &**ptr {
+                    ASTNode::VAR { name, indices: _ } => {
+                        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+                        if let Some(_vardetails) = gst.get(name) {
+                            let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
+                            return regaddr;
+                        } else {
+                            __exit_on_err("This variable is not defined".to_string());
+                        }
+                    }
+                    _ => {
+                        __exit_on_err("Cannot grab a reference to a non variable".to_string());
+                    }
+                }
+                0
+            }
+            ASTNodeType::Deref => {
+                let regaddr: usize = __code_gen(ptr, file, false).try_into().unwrap();
+                if let Err(e) = writeln!(file, "MOV R{},[R{}]", regaddr, regaddr) {
+                    __exit_on_err(e.to_string());
+                }
+                return regaddr;
+            }
             _ => 0,
         },
         /*
@@ -619,6 +643,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             //increment label_count
             0
         }
+        /*
+         * L1:
+         * ...
+         * <expr>
+         * <cond>
+         * <jz> L1
+         * L2:
+         */
         ASTNode::BreakNode => {
             let while_tracker = WHILE_TRACKER.lock().unwrap();
             writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 1])

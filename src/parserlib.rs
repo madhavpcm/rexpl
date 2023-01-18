@@ -29,6 +29,9 @@ pub enum ASTNodeType {
     Write,
     Connector,
 
+    Ref,
+    Deref,
+
     Gt,
     Lt,
     Gte,
@@ -43,6 +46,8 @@ impl std::fmt::Display for ASTExprType {
             ASTExprType::Int => write!(f, "int_t"),
             ASTExprType::String => write!(f, "str_t"),
             ASTExprType::Bool => write!(f, "bool_t"),
+            ASTExprType::IntRef => write!(f, "intptr_t"),
+            ASTExprType::StringRef => write!(f, "strptr_t"),
             _ => {
                 write!(f, "Node")
             }
@@ -53,6 +58,8 @@ impl std::fmt::Display for ASTExprType {
 pub enum ASTExprType {
     Int,
     String,
+    IntRef,
+    StringRef,
     Bool,
     Null,
 }
@@ -65,6 +72,7 @@ pub enum ASTError {
 pub enum VarList {
     Node {
         var: String,
+        refr: bool,
         indices: Vec<usize>,
         next: Box<VarList>,
     },
@@ -169,7 +177,7 @@ pub fn validate_ast_binary_node(
         ASTNode::VAR { name, indices: _ } => {
             let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(value) = hashmap.get(name.as_str()) {
-                if value.vartype != ASTExprType::Int {
+                if &value.vartype == &ASTExprType::String {
                     false
                 } else {
                     true
@@ -178,6 +186,26 @@ pub fn validate_ast_binary_node(
                 false
             }
         }
+        ASTNode::UnaryNode { op, ptr } => match *op {
+            ASTNodeType::Ref => {
+                let name = match &**ptr {
+                    ASTNode::VAR { name, indices: _ } => name.clone(),
+                    _ => "".to_owned(),
+                };
+                log::info!("{}", name);
+                let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
+                if let Some(value) = hashmap.get(name.as_str()) {
+                    if value.vartype != ASTExprType::Int {
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        },
         _ => false,
     };
     let right: bool = match rhs {
@@ -196,10 +224,31 @@ pub fn validate_ast_binary_node(
             }
         }
         ASTNode::INT(_a) => true,
+        ASTNode::STR(_a) => true,
+        ASTNode::UnaryNode { op, ptr } => match *op {
+            ASTNodeType::Ref => {
+                let name = match &**ptr {
+                    ASTNode::VAR { name, indices: _ } => name.clone(),
+                    _ => "".to_owned(),
+                };
+                log::info!("{}", name);
+                let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
+                if let Some(value) = hashmap.get(name.as_str()) {
+                    if &value.vartype != sign {
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        },
         ASTNode::VAR { name, indices: _ } => {
             let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(value) = hashmap.get(name.as_str()) {
-                if value.vartype != ASTExprType::Int {
+                if &value.vartype == &ASTExprType::String {
                     false
                 } else {
                     true
@@ -226,11 +275,6 @@ pub fn validate_condition_expression(expr: &ASTNode) -> Result<bool, ()> {
             ASTExprType::Bool => true,
             _ => false,
         },
-        ASTNode::INT(_a) => false,
-        ASTNode::VAR {
-            name: _,
-            indices: _,
-        } => false,
         _ => false,
     };
 
@@ -275,15 +319,28 @@ pub fn __gentypehash(declnode: &ASTNode) {
 
             loop {
                 match ptr {
-                    VarList::Node { var, indices, next } => {
+                    VarList::Node {
+                        var,
+                        refr,
+                        indices,
+                        next,
+                    } => {
                         if gst.contains_key(&var) == true {
                             log::error!("Variable : [{}] is already declared", var);
                             std::process::exit(1);
                         }
+                        let mut vart = var_type.clone();
+                        if refr == true {
+                            if vart == ASTExprType::String {
+                                vart = ASTExprType::StringRef;
+                            } else {
+                                vart = ASTExprType::IntRef;
+                            }
+                        }
                         gst.insert(
                             var,
                             Variable {
-                                vartype: var_type.clone(),
+                                vartype: vart.clone(),
                                 varid: var_id.clone(),
                                 varindices: indices.clone(),
                             },
@@ -307,8 +364,136 @@ pub fn __gentypehash(declnode: &ASTNode) {
     };
 }
 /*
+ * Validate whether a variable is type
+ */
+pub fn validate_var(node: &ASTNode) -> Result<bool, ()> {
+    match node {
+        ASTNode::VAR { name, indices: _ } => {
+            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            if let Some(vardetails) = gst.get(name) {
+                if vardetails.vartype != ASTExprType::Int
+                    || vardetails.vartype != ASTExprType::String
+                {
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
+            } else {
+                Ok(false)
+            }
+        }
+        _ => Ok(false),
+    }
+}
+/*
+ * Validate whether a variable is reference type
+ */
+pub fn validate_refr(node: &ASTNode) -> Result<bool, ()> {
+    match node {
+        ASTNode::VAR { name, indices: _ } => {
+            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            if let Some(vardetails) = gst.get(name) {
+                if vardetails.vartype != ASTExprType::IntRef
+                    || vardetails.vartype != ASTExprType::StringRef
+                {
+                    Ok(false)
+                } else {
+                    Ok(true)
+                }
+            } else {
+                Ok(false)
+            }
+        }
+        _ => Ok(false),
+    }
+}
+/*
  * Parser debug
  */
 pub fn __parse_debug() {
     log::warn!("Im here");
+}
+/*
+ * Meta function to get variable type
+ */
+
+pub fn getvartype(name: &String) -> Result<ASTExprType, ()> {
+    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    if let Some(value) = gst.get(name) {
+        return Ok(value.vartype);
+    } else {
+        return Ok(ASTExprType::Null);
+    }
+}
+
+pub fn validate_assg(rhs: &ASTNode, sign: &ASTExprType) -> Result<bool, ()> {
+    let result = match rhs {
+        ASTNode::BinaryNode {
+            op: _,
+            exprtype,
+            lhs: _,
+            rhs: _,
+        } => {
+            if exprtype != sign {
+                false
+            } else {
+                true
+            }
+        }
+        ASTNode::INT(_a) => {
+            if sign == &ASTExprType::Int {
+                true
+            } else {
+                false
+            }
+        }
+        ASTNode::STR(_a) => {
+            if sign == &ASTExprType::String {
+                true
+            } else {
+                false
+            }
+        }
+        ASTNode::VAR { name, indices: _ } => {
+            let t = getvartype(name)?;
+            if &t != sign {
+                false
+            } else {
+                true
+            }
+        }
+        ASTNode::UnaryNode { op, ptr } => match *op {
+            ASTNodeType::Deref => {
+                if let ASTNode::VAR { name, indices: _ } = &**ptr {
+                    let t = getvartype(name)?;
+                    if sign == &ASTExprType::Int && t == ASTExprType::IntRef
+                        || sign == &ASTExprType::String && t == ASTExprType::StringRef
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            ASTNodeType::Ref => {
+                if let ASTNode::VAR { name, indices: _ } = &**ptr {
+                    let t = getvartype(name)?;
+                    if sign == &ASTExprType::IntRef && t == ASTExprType::Int
+                        || sign == &ASTExprType::StringRef && t == ASTExprType::String
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    return Ok(result);
 }
