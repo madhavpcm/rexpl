@@ -497,6 +497,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     ASTNode::VAR { name, indices: _ } => {
                         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
                         if let Some(_vardetails) = gst.get(name) {
+                            std::mem::drop(gst);
                             let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
                             return regaddr;
                         } else {
@@ -504,18 +505,33 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         }
                     }
                     _ => {
-                        __exit_on_err("Cannot grab a reference to a non variable".to_string());
+                        __exit_on_err(
+                            "Reference to a basic data type is only possible".to_string(),
+                        );
                     }
                 }
                 0
             }
-            ASTNodeType::Deref => {
-                let regaddr: usize = __code_gen(ptr, file, false).try_into().unwrap();
-                if let Err(e) = writeln!(file, "MOV R{},[R{}]", regaddr, regaddr) {
-                    __exit_on_err(e.to_string());
+            ASTNodeType::Deref => match &**ptr {
+                ASTNode::VAR { name, indices: _ } => {
+                    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+                    if let Some(_vardetails) = gst.get(name) {
+                        std::mem::drop(gst);
+                        let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
+                        if let Err(e) = writeln!(file, "MOV R{},[R{}]", regaddr, regaddr) {
+                            __exit_on_err(e.to_string());
+                        }
+                        return regaddr;
+                    } else {
+                        __exit_on_err("This variable is not defined".to_string());
+                        0
+                    }
                 }
-                return regaddr;
-            }
+                _ => {
+                    __exit_on_err("Cannot dereference a non pointer".to_string());
+                    0
+                }
+            },
             _ => 0,
         },
         /*
@@ -751,8 +767,6 @@ pub fn code_gen(root: &ASTNode, filename: String) -> usize {
         .write(true)
         .append(true)
         .open(filename.as_str());
-
-    __print_gst();
 
     match f {
         Ok(mut file) => {

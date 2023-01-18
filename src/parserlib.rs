@@ -204,6 +204,23 @@ pub fn validate_ast_binary_node(
                     false
                 }
             }
+            ASTNodeType::Deref => {
+                let name = match &**ptr {
+                    ASTNode::VAR { name, indices: _ } => name.clone(),
+                    _ => "".to_owned(),
+                };
+                log::info!("{}", name);
+                let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
+                if let Some(value) = hashmap.get(name.as_str()) {
+                    if value.vartype != ASTExprType::IntRef {
+                        false
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                }
+            }
             _ => false,
         },
         _ => false,
@@ -371,12 +388,14 @@ pub fn validate_var(node: &ASTNode) -> Result<bool, ()> {
         ASTNode::VAR { name, indices: _ } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(vardetails) = gst.get(name) {
-                if vardetails.vartype != ASTExprType::Int
-                    || vardetails.vartype != ASTExprType::String
-                {
-                    Ok(false)
-                } else {
+                if vardetails.vartype == ASTExprType::Int {
                     Ok(true)
+                } else {
+                    if vardetails.vartype == ASTExprType::String {
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
                 }
             } else {
                 Ok(false)
@@ -393,12 +412,12 @@ pub fn validate_refr(node: &ASTNode) -> Result<bool, ()> {
         ASTNode::VAR { name, indices: _ } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(vardetails) = gst.get(name) {
-                if vardetails.vartype != ASTExprType::IntRef
-                    || vardetails.vartype != ASTExprType::StringRef
+                if vardetails.vartype == ASTExprType::IntRef
+                    || vardetails.vartype == ASTExprType::StringRef
                 {
-                    Ok(false)
-                } else {
                     Ok(true)
+                } else {
+                    Ok(false)
                 }
             } else {
                 Ok(false)
@@ -435,13 +454,17 @@ pub fn validate_assg(rhs: &ASTNode, sign: &ASTExprType) -> Result<bool, ()> {
             rhs: _,
         } => {
             if exprtype != sign {
-                false
+                if exprtype == &ASTExprType::Int && sign == &ASTExprType::IntRef {
+                    true
+                } else {
+                    false
+                }
             } else {
                 true
             }
         }
         ASTNode::INT(_a) => {
-            if sign == &ASTExprType::Int {
+            if sign != &ASTExprType::String {
                 true
             } else {
                 false

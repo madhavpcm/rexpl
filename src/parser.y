@@ -322,6 +322,33 @@ InputStmt -> Result<ASTNode, ()>:
 			ptr : Box::new($3?),
 		})
 	}
+	| "READ" '(' '*' Variable ')' ';'
+	{
+		let var = $4?;
+
+		let mut Name="".to_owned();
+        let vartype= getvartype(match var{
+            ASTNode::VAR {ref name, ref indices} => {
+				Name=name.clone();
+				&Name
+            }
+            _ => &Name
+        })?;
+
+		if vartype != ASTExprType::StringRef && vartype != ASTExprType::IntRef {
+			return Ok(ASTNode::ErrorNode{
+				err:ASTError::TypeError("* must precede a reference type".to_owned()),
+			});
+		}
+
+		Ok(ASTNode::UnaryNode{
+			op : ASTNodeType::Read,
+			ptr : Box::new(ASTNode::UnaryNode{
+				op: ASTNodeType::Deref,
+				ptr: Box::new(var),
+			}),
+		})
+	}
 	;
 
 OutputStmt -> Result<ASTNode, ()>:
@@ -351,6 +378,9 @@ AssgStmt -> Result<ASTNode, ()>:
         })?;
 
         if validate_assg(&rhs,&lhstype) == Ok(false) {
+			if lhstype == ASTExprType::StringRef || lhstype == ASTExprType::IntRef {
+				log::warn!("Reference Type assigned");
+			}
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
             });
@@ -371,13 +401,27 @@ AssgStmt -> Result<ASTNode, ()>:
 		let rhs = $4?;
 
 		let mut Name="".to_owned();
-        let lhstype = getvartype(match lhs {
+        let mut lhstype = getvartype(match lhs {
             ASTNode::VAR {ref name, ref indices} => {
 				Name=name.clone();
 				&Name
             }
             _ => &Name
         })?;
+
+		if !(lhstype == ASTExprType::StringRef || lhstype == ASTExprType::IntRef){
+			return Ok(ASTNode::ErrorNode{
+				err : ASTError::TypeError("* operator expected a reference type while assigning".to_owned())
+			});
+		}
+
+		if lhstype == ASTExprType::StringRef {
+			lhstype = ASTExprType::String;
+		}
+		else {
+			lhstype = ASTExprType::Int;
+		}
+
         if validate_assg(&rhs,&lhstype) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
                 err : ASTError::TypeError("TypeError :: at operator ".to_owned() + var.as_str()),
@@ -386,7 +430,10 @@ AssgStmt -> Result<ASTNode, ()>:
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Equals,
             exprtype : ASTExprType::Null,
-			lhs : Box::new(lhs),
+			lhs : Box::new(ASTNode::UnaryNode{
+				op: ASTNodeType::Deref,
+				ptr: Box::new(lhs)
+			}),
 			rhs : Box::new(rhs),
 		})
 	}
@@ -717,7 +764,7 @@ VariableExpr -> Result<ASTNode,()>:
 
 		if validate_var(&var) == Ok(false){
             return Ok(ASTNode::ErrorNode{ 
-                err : ASTError::TypeError("& can be used only on INT or STR types: ".to_owned()  ),
+                err : ASTError::TypeError("& can be used only on INT or STR types: ".to_owned()  )
             });
 		}
 		Ok(ASTNode::UnaryNode{
