@@ -195,10 +195,14 @@ pub fn validate_ast_binary_node(
                 log::info!("{}", name);
                 let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
                 if let Some(value) = hashmap.get(name.as_str()) {
-                    if value.vartype != ASTExprType::Int {
-                        false
-                    } else {
+                    if sign == &ASTExprType::Bool {
                         true
+                    } else if sign == &ASTExprType::String && value.vartype == ASTExprType::String {
+                        true
+                    } else if sign == &ASTExprType::Int {
+                        true
+                    } else {
+                        false
                     }
                 } else {
                     false
@@ -251,7 +255,28 @@ pub fn validate_ast_binary_node(
                 log::info!("{}", name);
                 let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
                 if let Some(value) = hashmap.get(name.as_str()) {
-                    if &value.vartype != sign {
+                    if sign == &ASTExprType::Bool {
+                        true
+                    } else if sign == &ASTExprType::String && value.vartype == ASTExprType::String {
+                        true
+                    } else if sign == &ASTExprType::Int {
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            ASTNodeType::Deref => {
+                let name = match &**ptr {
+                    ASTNode::VAR { name, indices: _ } => name.clone(),
+                    _ => "".to_owned(),
+                };
+                log::info!("{}", name);
+                let hashmap = GLOBALSYMBOLTABLE.lock().unwrap();
+                if let Some(value) = hashmap.get(name.as_str()) {
+                    if value.vartype != ASTExprType::IntRef {
                         false
                     } else {
                         true
