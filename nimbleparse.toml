@@ -1,5 +1,17 @@
 [[parsers]]
+yacc_kind = "Grmtools"
 l_file = "src/lexer.l"
 y_file = "src/parser.y"
 extension = ".expl"
 
+[[tests]]
+kind = {"Dir" = "test/**"}
+pass = true
+
+[[tests]]
+kind = {"Dir" = "test/**"}
+pass = true
+
+[[tests]]
+kind = {"Dir" = "test/**"}
+pass = false 

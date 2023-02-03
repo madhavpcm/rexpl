@@ -18,6 +18,7 @@ mod codegen;
 mod exprtree;
 mod linker;
 mod parserlib;
+mod validation;
 
 fn read_file(path: &str) -> String {
     let mut f = match File::open(path) {

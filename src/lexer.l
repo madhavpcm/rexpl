@@ -19,6 +19,8 @@ decl "DECL"
 enddecl "ENDDECL"
 str "STR_T"
 int "INT_T"
+int[ \t]*\* "INTPTR_T"
+str[ \t]*\* "STRPTR_T"
 
 == "=="
 <= "<="
