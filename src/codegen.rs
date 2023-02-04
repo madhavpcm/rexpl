@@ -529,6 +529,69 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             },
             _ => 0,
         },
+        ASTNode::FuncCallNode { fname, arglist } => loop {
+            let mut ptr = &**arglist;
+            loop {
+                match ptr {
+                    ArgList::Node { expr, next } => {
+                        let retvaladdr = __code_gen(expr, file, refr);
+                        if let Err(e) = writeln!(file, "PUSH R{}", retvaladdr) {
+                            exit_on_err(e.to_string());
+                        }
+                        free_reg(retval);
+                        ptr = &**next;
+                    }
+                    ArgList::Null => break,
+                }
+            }
+        },
+
+        ASTNode::FuncDeclNode {
+            fname: _,
+            ret_type: _,
+            paramlist: _,
+        } => 0,
+        /*
+         * L1:
+         *    Subtract SP by declvars.size()
+         *    <body>
+         *    ret
+         */
+        ASTNode::FuncDefNode {
+            fname,
+            ret_type,
+            paramlist,
+            decl,
+            body,
+        } => {
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let l = label_count.clone();
+            *label_count += 1;
+            //push bp
+            if let Err(e) = writeln!(file, "L{}:", l) {
+                exit_on_err(e.to_string());
+            }
+            if let Err(e) = writeln!(file, "PUSH BP") {
+                exit_on_err(e.to_string());
+            }
+            //new frame
+            if let Err(e) = writeln!(file, "MOV BP,SP") {
+                exit_on_err(e.to_string());
+            }
+            let ft = FUNCTION_TABLE.lock().unwrap();
+            if let Some(local_table) = ft.get(fname) {
+                let mut ss = SCOPE_STACK.lock().unwrap();
+                ss.push(local_table);
+                std::mem::drop(ss);
+                std::mem::drop(ft);
+
+                __code_gen(&**body, file, false);
+
+                let mut ss = SCOPE_STACK.lock().unwrap();
+                ss.pop();
+            }
+            0
+        }
         /*
          * <expr>
          * <cond>

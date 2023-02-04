@@ -21,6 +21,8 @@
 %token "CONTINUE"
 %token "DECL"
 %token "ENDDECL"
+%token "MAIN"
+%token "RETURN"
 %token ";"
 %token "="
 %nonassoc ">" "<" ">=" '<=' "==" "!="
@@ -29,7 +31,7 @@
 
 %%
 Start -> Result<ASTNode, ()>:
-	GDeclBlock FDefBlock BeginBlock
+	GDeclBlock FDefBlock MainBlock
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
@@ -43,7 +45,7 @@ Start -> Result<ASTNode, ()>:
 			rhs : Box::new($3?),
 		})
 	}
-	| GDeclBlock BeginBlock
+	| GDeclBlock MainBlock 
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
@@ -52,7 +54,7 @@ Start -> Result<ASTNode, ()>:
 			rhs : Box::new($2?),
 		})
 	}
-    | BeginBlock
+    | MainBlock 
     {
         Ok(ASTNode::BinaryNode{
             op: ASTNodeType::Connector,
@@ -61,6 +63,12 @@ Start -> Result<ASTNode, ()>:
             rhs: Box::new($1?),
         })
     }
+	;
+MainBlock -> Result<ASTNode,()>:
+	"INT" "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
+	{
+			
+	}
 	;
 BeginBlock -> Result<ASTNode,()>:
 	"BEGIN" StmtList "END" ';'
@@ -268,7 +276,7 @@ FDefBlock -> Result<ASTNode,()>:
 	;
 
 FDef -> Result<ASTNode,()>:
-	PtrType "VAR" '(' ParamList ')' '{' LDeclBlock StmtList '}'
+	PtrType "VAR" '(' ParamList ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| ())?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
@@ -407,6 +415,9 @@ Param -> Result<ParamList,()>:
         let vtype = $1?;
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
+				if indices != Vec::default() {
+					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned())
+				}
 				Ok(ParamList::Node{
 					var:var,
                     vartype:vtype,
@@ -427,6 +438,9 @@ Param -> Result<ParamList,()>:
         let vtype = $1?;
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
+				if indices != Vec::default() {
+					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned())
+				}
 				Ok(ParamList::Node{
 					var:var,
                     vartype:vtype,
@@ -565,6 +579,12 @@ Stmt -> Result<ASTNode,()>:
 	{
 		Ok(ASTNode::ContinueNode)
 	}
+	| "RETURN" Expr ';'
+	{
+		Ok(ASTNode::ReturnNode{
+			expr: Box::new($2?)
+		})
+	}
 	;
 
 WhileStmt -> Result<ASTNode, ()>:
@@ -685,7 +705,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type mismatch".to_owned()),
             });
 		}
 

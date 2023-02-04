@@ -240,6 +240,64 @@ pub fn getvarindices(name: &String) -> Result<Vec<usize>, ()> {
         }
     }
 }
+pub fn get_ldecl_storage(decl: &ASTNode) -> usize {
+    let mut size = 0;
+    match decl {
+        ASTNode::DeclNode { var_type, list } => {
+            let mut ptr = &**list;
+            loop {
+                match ptr {
+                    VarList::Node {
+                        var,
+                        refr,
+                        indices,
+                        next,
+                    } => {
+                        let mut varsize = 1;
+                        for i in indices {
+                            varsize = varsize * i;
+                        }
+                        size += varsize;
+                        ptr = &**next;
+                    }
+                    VarList::Null => {
+                        break;
+                    }
+                }
+            }
+        }
+        _ => {
+            exit_on_err("Invalid node in ldecl".to_string());
+        }
+    }
+    size
+}
+pub fn get_paramlist_storage(paramlist: &ParamList) -> usize {
+    let mut size = 0;
+    let mut ptr = &**paramlist;
+    loop {
+        match ptr {
+            ParamList::Node {
+                var:_,
+                vartype:_,
+                indices:_,
+                next:_,
+            } => {
+                let mut varsize = 1;
+                for i in indices {
+                    varsize = varsize * i;
+                }
+                size += varsize;
+                ptr = &**next;
+            }
+            ParamList::Null => {
+                break;
+            }
+        }
+    }
+    }
+}
+
 pub fn getvarid(name: &String) -> Result<i64, ()> {
     let ss = SCOPE_STACK.lock().unwrap();
     if let Some(lst) = ss.last() {

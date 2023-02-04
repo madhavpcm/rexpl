@@ -168,10 +168,13 @@ pub enum ASTNode {
     },
     FuncCallNode {
         fname: String,
-        paramlist: Box<ArgList>,
+        arglist: Box<ArgList>,
     },
     ErrorNode {
         err: ASTError,
+    },
+    ReturnNode {
+        expr: Box<ASTNode>,
     },
     BreakNode,
     ContinueNode,
