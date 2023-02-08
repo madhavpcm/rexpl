@@ -14,7 +14,7 @@ use std::sync::Mutex;
 //TODO Assignment statement can be optimized
 //recursive call
 const MAX_REGISTERS: usize = 21;
-const XSM_STACK_OFFSET: i64 = 4096;
+pub const XSM_STACK_OFFSET: i64 = 4096;
 pub const LABEL_NOT_FOUND: usize = 10000;
 
 lazy_static! {
@@ -26,6 +26,7 @@ lazy_static! {
     pub static ref SCOPE_STACK: Mutex<Vec<HashMap<String, LSymbol>>> = Mutex::new(Vec::default());
     pub static ref FUNCTION_STACK: Mutex<Vec<String>> = Mutex::new(Vec::default());
     pub static ref BASE_POINTER: Mutex<i64> = Mutex::new(0);
+    pub static ref REGISTER_STACK: Mutex<Vec<Vec<(bool, i64)>>> = Mutex::new(Vec::default());
 }
 /*
  * Function to assign a register which has the lowest index
@@ -58,11 +59,53 @@ pub fn free_reg(register: usize) -> u64 {
     registers[register].0 = false;
     return MAX_REGISTERS.try_into().unwrap();
 }
-/*
- * Meta function which recursively generates assembly lines
- * in xsm for arithmetic operations
- */
-fn __load_variable(mut file: &File, vname: &String) -> usize {
+//function to backup live registers
+fn __backup_registers(mut file: &File) {
+    let mut registers = REGISTERS.lock().unwrap();
+    let mut rs = REGISTER_STACK.lock().unwrap();
+    rs.push(registers.clone());
+
+    //reset to not used
+    for i in 0..MAX_REGISTERS {
+        if registers[i].0 == true {
+            if let Err(e) = writeln!(file, "PUSH R{}", i) {
+                exit_on_err(e.to_string());
+            }
+        }
+        registers[i].0 = false;
+    }
+}
+//function to get a safe register for return_value of a function
+fn __get_safe_register() -> usize {
+    let rs = REGISTER_STACK.lock().unwrap();
+    let registers = rs.last().unwrap();
+    for i in 0..MAX_REGISTERS {
+        //lowest register number free is returned
+        if registers[i].0 == false {
+            return i;
+        }
+    }
+    0
+}
+//function to restore register context
+fn __restore_register(mut file: &File, safe_register: usize) {
+    let mut registers = REGISTERS.lock().unwrap();
+    for i in 0..MAX_REGISTERS {
+        registers[i].0 = false;
+    }
+    let mut rs = REGISTER_STACK.lock().unwrap();
+    *registers = rs.last().unwrap().clone();
+    for i in MAX_REGISTERS - 1..=0 {
+        if registers[i].0 == true && i != safe_register {
+            if let Err(e) = writeln!(file, "POP R{}", i) {
+                exit_on_err(e.to_string());
+            }
+        }
+    }
+    rs.pop();
+    //reset to not used
+}
+fn __load_variable(mut file: &File, vname: &String, refr: bool) -> usize {
     let ss = SCOPE_STACK.lock().unwrap();
     if let Some(lst) = ss.last() {
         if let Some(entry) = lst.get(vname) {
@@ -85,9 +128,6 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
                             exit_on_err(e.to_string())
                         }
                     }
-                    if let Err(e) = writeln!(file, "MOV R{}, [R{}]", vreg, vreg) {
-                        exit_on_err(e.to_string())
-                    }
                     vreg
                 }
                 _ => {
@@ -105,7 +145,12 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
                         varindices: _,
                     } => {
                         let vreg = get_reg();
-                        if let Err(e) = writeln!(file, "MOV R{}, [{}]", vreg, varid) {
+                        if let Err(e) = writeln!(
+                            file,
+                            "MOV R{}, {}",
+                            vreg,
+                            XSM_STACK_OFFSET + i64::try_from(varid.clone()).unwrap()
+                        ) {
                             exit_on_err(e.to_string())
                         }
                         vreg
@@ -130,7 +175,12 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
                     varindices: _,
                 } => {
                     let vreg = get_reg();
-                    if let Err(e) = writeln!(file, "MOV R{}, [{}]", vreg, varid) {
+                    if let Err(e) = writeln!(
+                        file,
+                        "MOV R{}, {}",
+                        vreg,
+                        XSM_STACK_OFFSET + i64::try_from(varid.clone()).unwrap()
+                    ) {
                         exit_on_err(e.to_string())
                     }
                     vreg
@@ -146,6 +196,10 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
         }
     }
 }
+/*
+ * Meta function which recursively generates assembly lines
+ * in xsm for arithmetic operations
+ */
 fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
     match root {
         ASTNode::ErrorNode { err } => {
@@ -180,7 +234,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
-            let baseaddrreg = __load_variable(file, name);
+            let baseaddrreg = __load_variable(file, name, refr);
 
             let mut registers = REGISTERS.lock().unwrap();
             registers[baseaddrreg].1 =
@@ -609,8 +663,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             },
             _ => 0,
         },
-        ASTNode::FuncCallNode { fname, arglist } => loop {
+        ASTNode::FuncCallNode { fname, arglist } => {
             let mut ptr = &**arglist;
+            //Save Live registers
+            __backup_registers(file);
+            //Push Arguments
             loop {
                 match ptr {
                     ArgList::Node { expr, next } => {
@@ -624,8 +681,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     ArgList::Null => break,
                 }
             }
+            //Push return value
             let pushaddr = get_reg();
-            if let Err(e) = writeln!(file, "PUSH R{}\nPUSH R{}", pushaddr, pushaddr) {
+            if let Err(e) = writeln!(file, "PUSH R{}", pushaddr) {
                 exit_on_err(e.to_string());
             }
             free_reg(pushaddr);
@@ -644,7 +702,22 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     _ => exit_on_err("Function not declared".to_string()),
                 }
             }
-        },
+            //get safe register
+            let safe_reg = __get_safe_register();
+            if let Err(e) = writeln!(file, "POP R{}", safe_reg) {
+                exit_on_err(e.to_string());
+            }
+            //Restore live registers
+            __restore_register(file, safe_reg);
+            0
+        }
+        ASTNode::ReturnNode { expr } => {
+            let reg = __code_gen(expr, file, refr);
+            if let Err(e) = writeln!(file, "RET R{}", reg) {
+                exit_on_err(e.to_string());
+            }
+            0
+        }
         ASTNode::MainNode { decl, body } => {
             //this node is traverse after all function def nodes,
             let mut label_count = LABEL_COUNT.lock().unwrap();
@@ -689,10 +762,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 std::mem::drop(ss);
                 std::mem::drop(ft);
 
-                if let Err(e) = writeln!(file, "MOV SP, {}\nMOV BP,SP", baseaddr) {
+                if let Err(e) = writeln!(file, "SUB SP, {}", get_ldecl_storage(decl)) {
                     exit_on_err(e.to_string());
                 }
-                if let Err(e) = writeln!(file, "SUB SP, {}", get_ldecl_storage(decl)) {
+                if let Err(e) = writeln!(file, "MOV SP, {}\nMOV BP,SP", baseaddr) {
                     exit_on_err(e.to_string());
                 }
                 __code_gen(body, file, false);
@@ -918,7 +991,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
 fn __header_gen(mut file: &File) {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     log::info!("Global Symbol Table Size : {}", gst.len());
-    if let Err(e) = writeln!(file, "0\n2056\n0\n0\n0\n0\n0\n0\n",) {
+    if let Err(e) = writeln!(file, "0\n2056\n0\n0\n0\n0\n0\n0\nBRKP",) {
         exit_on_err(e.to_string());
     }
 }

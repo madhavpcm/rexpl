@@ -29,7 +29,6 @@
 %nonassoc ">" "<" ">=" '<=' "==" "!="
 %left '+' '-'
 %left '*' '/' '%'
-
 %%
 Start -> Result<ASTNode, ()>:
 	GDeclBlock FDefBlock MainBlock
@@ -68,33 +67,21 @@ Start -> Result<ASTNode, ()>:
 MainBlock -> Result<ASTNode,()>:
 	"INT_T" "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
-		let mut ss = SCOPE_STACK.lock().unwrap();
 		let mut fs = FUNCTION_STACK.lock().unwrap();
 		fs.push("main".to_string());
-		ss.push(HashMap::default().clone());
-		log::info!("before size ofscope : {}", ss.last().unwrap().len());
-
-		std::mem::drop(ss);
 		std::mem::drop(fs);
-
-		log::info!("main()");
 		let ldecl_ = $6.map_err(|_| ())?;
-		__gen_local_symbol_table(&ldecl_, &ParamList::Null);
 		let body_ = $7.map_err(|_| ())?;
-
 		let node = ASTNode::MainNode{
 			decl: Box::new(ldecl_),
 			body: Box::new(body_),
 		};
-
 		let mut ss =SCOPE_STACK.lock().unwrap();
-		log::info!("before size ofscope : {}", ss.last().unwrap().len());
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
 		ft.insert(
 			"main".to_string(),
 			ss.last().unwrap().clone()
 		);
-    log::info!("in the end size ofscope : {}", ss.len());
 		ss.pop();
 		Ok(node)
 	}
@@ -102,19 +89,10 @@ MainBlock -> Result<ASTNode,()>:
 BeginBlock -> Result<ASTNode,()>:
 	"BEGIN" StmtList "END" 
 	{
-		let ss = SCOPE_STACK.lock().unwrap();
-		if let Some(sz) = ss.last() {
-			log::info!("before size ofscope : {}", sz.len());
-		}
-		else{
-			log::error!("err {}" , ss.len());
-		}
-		std::mem::drop(ss);
 		$2
 	}
 	| "BEGIN" "END" 
 	{
-		log::error!("Empty beginend");
 		Ok(ASTNode::Null)
 	}
 	;
@@ -128,34 +106,29 @@ GDeclBlock -> Result<ASTNode,()>:
 		Ok(ASTNode::Null)
 	}
 	;
-
-LDeclList -> Result<ASTNode, ()>:
+LDeclList -> Result<LinkedList<ASTNode>, ()>:
 	LDeclList LDecl 
 	{
-		let decl = $2?;
-
-		Ok(ASTNode::BinaryNode{
-			op : ASTNodeType::Connector,
-            exprtype : Some(ASTExprType::Null),
-			lhs : Box::new($1?),
-			rhs : Box::new(decl),
-		})
+		let mut decl = $2?;
+		let mut list: LinkedList<ASTNode> = LinkedList::new();
+		list.push_back(decl);
+		list.append(&mut $1?);
+		Ok(list)
 	}
 	|
 	LDecl
 	{
-		let decl =$1?;
-		Ok(decl)
+		let mut decl =$1?;
+		let mut list : LinkedList<ASTNode> = LinkedList::new();
+		list.push_back(decl);
+		Ok(list)
 	}
 	;
-
 GDeclList -> Result<ASTNode, ()>:
 	GDeclList GDecl 
 	{
 		let decl = $2?;
-
 		__gen_global_symbol_table(&decl);
-
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Null),
@@ -170,7 +143,6 @@ GDeclList -> Result<ASTNode, ()>:
 		Ok(decl)
 	}
 	;
-
 LDecl ->  Result<ASTNode,()>:
 	Type VarList ';'
 	{
@@ -180,7 +152,6 @@ LDecl ->  Result<ASTNode,()>:
 		})
 	}
 	;
-
 GDecl ->  Result<ASTNode,()>:
 	Type VarList ';'
 	{
@@ -195,19 +166,16 @@ GDecl ->  Result<ASTNode,()>:
 		let v = $2.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
 		let paramlist = $4?;
-
 		let node = ASTNode::FuncDeclNode{
 			fname: functionname.clone(),
 			ret_type: returntype,
 			paramlist: Box::new(paramlist.clone()),
 		};
-
 		if validate_ast_node(&node) == Ok(false){
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Function [".to_owned() + functionname.as_str() + "] is redeclared."),
             });
 		}
-
 		let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
 		gst.insert(
 			functionname.clone(),
@@ -217,7 +185,6 @@ GDecl ->  Result<ASTNode,()>:
 				flabel: (0),
 			},
 		);
-
 		Ok(node)
 	}
 	| PtrType "VAR" '(' ParamList ')' ';'
@@ -226,19 +193,16 @@ GDecl ->  Result<ASTNode,()>:
 		let v = $2.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
 		let paramlist = $4?;
-
 		let node = ASTNode::FuncDeclNode{
 			fname: functionname.clone(),
 			ret_type: returntype,
 			paramlist: Box::new(paramlist.clone()),
 		};
-
 		if validate_ast_node(&node) == Ok(false){
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Function [".to_owned() + functionname.as_str() + "] is redeclared."),
             });
 		}
-
 		let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
 		gst.insert(
 			functionname.clone(),
@@ -248,11 +212,9 @@ GDecl ->  Result<ASTNode,()>:
 				flabel: (0),
 			},
 		);
-
 		Ok(node)
 	}
 	;
-
 PtrType -> Result<ASTExprType,()>:
 	"STRPTR_T"
 	{
@@ -273,8 +235,6 @@ Type -> Result<ASTExprType, ()>:
 		Ok(ASTExprType::String)
 	}
     ;
-
-
 VarList -> Result<VarList,()>:
 	VarList ',' VariableDef 
 	{
@@ -332,7 +292,6 @@ VarList -> Result<VarList,()>:
 		}
 	}
     ;
-
 FDefBlock -> Result<ASTNode,()>:
 	FDefBlock FDef 
 	{
@@ -348,36 +307,21 @@ FDefBlock -> Result<ASTNode,()>:
 		$1
 	}
 	;
-
 FDef -> Result<ASTNode,()>:
 	PtrType "VAR" '(' ParamList ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| ())?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let gst = GLOBALSYMBOLTABLE.lock().unwrap();
 		if gst.contains_key(&funcname) == false {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Function [".to_owned() + funcname.as_str() + "] is not declared."),
             });
 		}
-
-		let mut ss = SCOPE_STACK.lock().unwrap();
-		let mut fs = FUNCTION_STACK.lock().unwrap();
-		fs.push(funcname.clone());
-		ss.push(HashMap::default());
-		log::info!("()");
-
-		std::mem::drop(ss);
 		std::mem::drop(gst);
-		std::mem::drop(fs);
-
-		log::info!("asdf");
 		let ldecl_ = $7?;
 		let paramlist_ = $4?;
-
-		__gen_local_symbol_table( &ldecl_, &paramlist_ );
-
+		__gen_local_symbol_table( &LinkedList::new(), &paramlist_ );
 		let node = ASTNode::FuncDefNode{
 			fname: funcname.clone(),
 			ret_type: $1?,
@@ -385,7 +329,6 @@ FDef -> Result<ASTNode,()>:
 			decl: Box::new(ldecl_),
 			body: Box::new($8?),
 		};
-
 		let mut ss =SCOPE_STACK.lock().unwrap();
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
 		ft.insert(
@@ -393,36 +336,24 @@ FDef -> Result<ASTNode,()>:
 			ss.last().unwrap().clone()
 		);
 		ss.pop();
-
+		std::mem::drop(ss);
+		std::mem::drop(ft);
 		Ok(node)
 	}
 	| Type "VAR" '(' ParamList ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| ())?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let gst = GLOBALSYMBOLTABLE.lock().unwrap();
 		if gst.contains_key(&funcname) == false {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Function [".to_owned() + funcname.as_str() + "] is not declared."),
             });
 		}
-
-		let mut ss = SCOPE_STACK.lock().unwrap();
-		let mut fs = FUNCTION_STACK.lock().unwrap();
-		fs.push(funcname.clone());
-		ss.push(HashMap::default().clone());
-
-		std::mem::drop(ss);
 		std::mem::drop(gst);
-		std::mem::drop(fs);
-
-		log::info!("sadf");
 		let ldecl_ = $7?;
 		let paramlist_ = $4?;
-
-		__gen_local_symbol_table(&ldecl_, &paramlist_ );
-
+		__gen_local_symbol_table( &LinkedList::new(), &paramlist_ );
 		let body_ = $8?;
 		let node = ASTNode::FuncDefNode{
 			fname: funcname.clone(),
@@ -431,7 +362,6 @@ FDef -> Result<ASTNode,()>:
 			decl: Box::new(ldecl_),
 			body: Box::new(body_),
 		};
-
 		let mut ss =SCOPE_STACK.lock().unwrap();
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
 		ft.insert(
@@ -439,24 +369,26 @@ FDef -> Result<ASTNode,()>:
 			ss.last().unwrap().clone()
 		);
 		ss.pop();
-
+		std::mem::drop(ss);
+		std::mem::drop(ft);
 		Ok(node)
 	}
 	;
-
-LDeclBlock -> Result<ASTNode,()>:
+LDeclBlock -> Result<LinkedList<ASTNode>,()>:
 	"DECL" LDeclList "ENDDECL"
 	{
-		log::warn!("ss");
-	    $2
+	    let ldecl_ = $2?;
+		let mut ss = SCOPE_STACK.lock().unwrap();
+		ss.push(HashMap::default());
+		std::mem::drop(ss);
+		__gen_local_symbol_table(&ldecl_, &ParamList::Null);
+		Ok(ldecl_)
 	}
 	| "DECL" "ENDDECL"
 	{
-		log::warn!("Empty Declaration");
-        Ok(ASTNode::Null)
+        Ok(LinkedList::new())
 	}
 	;
-
 ParamList -> Result<ParamList,()>:
 	ParamList ',' Param
 	{
@@ -480,12 +412,10 @@ ParamList -> Result<ParamList,()>:
         $1
 	}
 	;
-
 Param -> Result<ParamList,()>:
 	PtrType VariableDef
     {
 		let var = $2?;
-
         let vtype = $1?;
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
@@ -508,7 +438,6 @@ Param -> Result<ParamList,()>:
 	| Type VariableDef
     {
 		let var = $2?;
-
         let vtype = $1?;
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
@@ -533,8 +462,6 @@ Param -> Result<ParamList,()>:
 		Ok(ParamList::Null)
 	}
 	;
-
-
 ArgList -> Result<ArgList,()>:
 	ArgList ',' Expr
 	{
@@ -553,19 +480,15 @@ ArgList -> Result<ArgList,()>:
 		})
 	}
 	;
-
 VariableDef -> Result<VarList,()>:
 	"VAR" "[" "INT" "]"
 	{
 		let v = $1.map_err(|_| ())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let v = $3.map_err(|_| ())?;
         let i= parse_usize($lexer.span_str(v.span())).unwrap();
-
         let mut indices_ :Vec<usize>= Vec::default();
         indices_.push(i);
-
 		Ok(VarList::Node{
 			var: var_,
 			refr:false,
@@ -577,7 +500,6 @@ VariableDef -> Result<VarList,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-
 		Ok(VarList::Node{
 			var: var_,
 			refr:false,
@@ -589,17 +511,13 @@ VariableDef -> Result<VarList,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let v = $3.map_err(|_| ())?;
         let i= parse_usize($lexer.span_str(v.span())).unwrap();
-
 		let v = $6.map_err(|_| ())?;
         let j= parse_usize($lexer.span_str(v.span())).unwrap();
-
         let mut indices_ : Vec<usize> = Vec::default();
         indices_.push(i);
         indices_.push(j);
-
 		Ok(VarList::Node{
 			var: var_,
 			refr:false,
@@ -608,10 +526,7 @@ VariableDef -> Result<VarList,()>:
 		})
 	}
 	;	
-
-
 //StateMents	
-
 StmtList -> Result<ASTNode, ()>:
 	StmtList Stmt 
 	{
@@ -627,7 +542,6 @@ StmtList -> Result<ASTNode, ()>:
 		$1
 	}
 	;
-
 Stmt -> Result<ASTNode,()>:
 	InputStmt 
 	{
@@ -664,7 +578,6 @@ Stmt -> Result<ASTNode,()>:
 		})
 	}
 	;
-
 WhileStmt -> Result<ASTNode, ()>:
     "WHILE" '(' Expr ')' "DO" StmtList "ENDWHILE" ';'
     {
@@ -675,12 +588,10 @@ WhileStmt -> Result<ASTNode, ()>:
         })
     }
     ;
-
 IfStmt -> Result<ASTNode, ()>:
 	"IF" '(' Expr ')' "THEN" StmtList "ELSE" StmtList "ENDIF" ';'
 	{
         let expr = $3?;
-
         Ok(ASTNode::IfElseNode{
             expr: Box::new(expr),
             xif: Box::new($6?),
@@ -690,14 +601,12 @@ IfStmt -> Result<ASTNode, ()>:
 	| "IF" '(' Expr ')' "THEN" StmtList "ENDIF" ';'
 	{
         let expr = $3?;
-
         Ok(ASTNode::IfNode{
             expr: Box::new(expr),
             xif: Box::new($6?),
         })
 	}
 	;
-
 OutputStmt -> Result<ASTNode, ()>:
 	"WRITE" '(' Expr ')' ';' 
 	{
@@ -712,7 +621,6 @@ AssgStmt -> Result<ASTNode, ()>:
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let lhs = $1?;
 		let rhs = $3?;
 		Ok(ASTNode::BinaryNode{
@@ -726,10 +634,8 @@ AssgStmt -> Result<ASTNode, ()>:
 	{
 		let v = $3.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let lhs = $2?;
 		let rhs = $4?;
-
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Equals,
             exprtype : Some(ASTExprType::Null),
@@ -741,7 +647,6 @@ AssgStmt -> Result<ASTNode, ()>:
 		})
 	}
 	;
-
 InputStmt -> Result<ASTNode, ()>:
 	"READ" '(' Variable ')' ';'
 	{
@@ -753,8 +658,6 @@ InputStmt -> Result<ASTNode, ()>:
 	| "READ" '(' '*' Variable ')' ';'
 	{
 		let var = $4?;
-
-
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Read,
 			ptr : Box::new(ASTNode::UnaryNode{
@@ -764,13 +667,11 @@ InputStmt -> Result<ASTNode, ()>:
 		})
 	}
 	;
-
 Expr -> Result<ASTNode,()>:
 	Expr '<' Expr 
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
 		
@@ -780,181 +681,144 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type mismatch".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '>' Expr 
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Gt,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at >".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '<=' Expr 
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Lte,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at <=".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '>=' Expr 
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Gte,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at >=".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '!=' Expr 
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Ne,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at !=".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '==' Expr 
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Ee,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at ==".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '+' Expr
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Plus,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at +".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '-' Expr
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Minus,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at -".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '*' Expr
@@ -963,69 +827,55 @@ Expr -> Result<ASTNode,()>:
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Star,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at *".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '/' Expr
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Slash,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at /".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| Expr '%' Expr
 	{
 		let v = $2.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
         let lhs = $1?;
         let rhs = $3?;
-
-
 		let node = ASTNode::BinaryNode{
 			op : ASTNodeType::Mod,
 			exprtype : None,
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Type error at %".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
     | '(' Expr ')'
@@ -1052,32 +902,25 @@ Expr -> Result<ASTNode,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
-
 		let node = ASTNode::FuncCallNode{
 			fname: functionname, 
 			arglist: Box::new(ArgList::Null),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
 				err: ASTError::TypeError("Arglist mismatch in type".to_string())
             });
 		}
-
 		Ok(node)
 	}
 	| "VAR" '(' ArgList ')'
 	{
-		log::info!("arglist");
 		let v = $1.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
-
-		
 		let node = ASTNode::FuncCallNode{
 			fname: functionname, 
 			arglist: Box::new($3?),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
 				err: ASTError::TypeError("Arglist mismatch in type".to_string())
@@ -1102,26 +945,20 @@ Variable -> Result<ASTNode, ()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let expr = $3?;
-		
         let mut ind : Vec<Box<ASTNode>> = Vec::default();
         ind.push(Box::new(expr));
-
 		Ok(ASTNode::VAR{
 			name: var,
 			indices: ind,
 		})
-
 	}
 	| "VAR" "[" Expr "]" "[" Expr "]"
 	{
 		let v = $1.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-
 		let i = $3?;
 		let j = $6?;
-
         let mut ind : Vec<Box<ASTNode>> = Vec::default();
         ind.push(Box::new(i));
         ind.push(Box::new(j));
@@ -1136,7 +973,6 @@ VariableExpr -> Result<ASTNode,()>:
 	Variable
 	{
 		let node = $1?;
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Variable not defined or out of scope".to_owned()),
@@ -1147,35 +983,29 @@ VariableExpr -> Result<ASTNode,()>:
 	| '&' Variable
 	{
 		let var = $2?;
-
 		let node = ASTNode::UnaryNode{
 			op: ASTNodeType::Ref,
 			ptr: Box::new(var),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Expected an Integer or String type for reference operator".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	| '*' Variable
 	{
 		let var = $2?;
-
 		let node = ASTNode::UnaryNode{
 			op: ASTNodeType::Ref,
 			ptr: Box::new(var),
 		};
-
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
                 err : ASTError::TypeError("Expected an IntegerReference or StringReference type for dereference operator".to_owned()),
             });
 		}
-
 		Ok(node)
 	}
 	;
@@ -1187,3 +1017,4 @@ use crate::codegen::SCOPE_STACK;
 use crate::codegen::FUNCTION_STACK;
 use crate::codegen::exit_on_err;
 use std::collections::HashMap;
+use std::collections::LinkedList;

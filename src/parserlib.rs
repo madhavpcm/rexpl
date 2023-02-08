@@ -1,5 +1,6 @@
 use lazy_static::lazy_static; // 1.4.0
 use std::collections::HashMap;
+use std::collections::LinkedList;
 use std::fmt::{Debug, Formatter};
 use std::sync::Mutex;
 
@@ -162,7 +163,7 @@ pub enum ASTNode {
         fname: String,
         ret_type: ASTExprType,
         paramlist: Box<ParamList>,
-        decl: Box<ASTNode>,
+        decl: Box<LinkedList<ASTNode>>,
         body: Box<ASTNode>,
     },
     FuncCallNode {
@@ -176,7 +177,7 @@ pub enum ASTNode {
         expr: Box<ASTNode>,
     },
     MainNode {
-        decl: Box<ASTNode>,
+        decl: Box<LinkedList<ASTNode>>,
         body: Box<ASTNode>,
     },
     BreakNode,
@@ -249,16 +250,14 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
 /*64
  * Function to check if a condition expression returns boolean
  */
-pub fn __gen_local_symbol_table(declnode: &ASTNode, paramlist: &ParamList) {
+pub fn __gen_local_symbol_table(decllist: &LinkedList<ASTNode>, paramlist: &ParamList) {
     let mut ss = SCOPE_STACK.lock().unwrap();
     let local_table = ss.last_mut().unwrap();
 
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-    let fs = FUNCTION_STACK.lock().unwrap();
-    let fname = fs.last().unwrap();
 
-    let mut local_var_id: i64 = 0;
-    let mut param_offset: i64 = -2;
+    let mut local_var_id: i64 = 1;
+    let mut param_offset: i64 = -3;
 
     let mut paramptr = paramlist;
     loop {
@@ -318,73 +317,75 @@ pub fn __gen_local_symbol_table(declnode: &ASTNode, paramlist: &ParamList) {
         };
     }
 
-    match declnode {
-        ASTNode::DeclNode { var_type, list } => {
-            let mut ptr = *list.clone();
+    for i in decllist.iter() {
+        match i {
+            ASTNode::DeclNode { var_type, list } => {
+                let mut ptr = *list.clone();
 
-            loop {
-                match ptr {
-                    VarList::Node {
-                        var,
-                        refr,
-                        indices,
-                        next,
-                    } => {
-                        if gst.contains_key(&var) == true {
-                            if let Some(entry) = gst.get(&var) {
-                                match entry {
-                                    GSymbol::Func {
-                                        ret_type: _,
-                                        paramlist: _,
-                                        flabel: _,
-                                    } => {
-                                        exit_on_err(
-                                            "Variable ".to_owned()
-                                                + var.as_str()
-                                                + " is already declared as a function",
-                                        );
+                loop {
+                    match ptr {
+                        VarList::Node {
+                            var,
+                            refr,
+                            indices,
+                            next,
+                        } => {
+                            if gst.contains_key(&var) == true {
+                                if let Some(entry) = gst.get(&var) {
+                                    match entry {
+                                        GSymbol::Func {
+                                            ret_type: _,
+                                            paramlist: _,
+                                            flabel: _,
+                                        } => {
+                                            exit_on_err(
+                                                "Variable ".to_owned()
+                                                    + var.as_str()
+                                                    + " is already declared as a function",
+                                            );
+                                        }
+                                        GSymbol::Var {
+                                            vartype: _,
+                                            varid: _,
+                                            varindices: _,
+                                        } => {
+                                            log::warn!("Variable {} is already declared as a variable in global scope", var);
+                                        }
+                                        GSymbol::Null => exit_on_err("GST error".to_owned()),
                                     }
-                                    GSymbol::Var {
-                                        vartype: _,
-                                        varid: _,
-                                        varindices: _,
-                                    } => {
-                                        log::warn!("Variable {} is already declared as a variable in global scope", var);
-                                    }
-                                    GSymbol::Null => exit_on_err("GST error".to_owned()),
                                 }
                             }
-                        }
-                        let mut vart = var_type.clone();
-                        if refr == true {
-                            if vart == ASTExprType::String {
-                                vart = ASTExprType::StringRef;
-                            } else {
-                                vart = ASTExprType::IntRef;
+                            let mut vart = var_type.clone();
+                            if refr == true {
+                                if vart == ASTExprType::String {
+                                    vart = ASTExprType::StringRef;
+                                } else {
+                                    vart = ASTExprType::IntRef;
+                                }
                             }
+                            local_table.insert(
+                                var,
+                                LSymbol::Var {
+                                    vartype: vart.clone(),
+                                    varid: local_var_id,
+                                    varindices: indices.clone(),
+                                },
+                            );
+                            let mut size = 1;
+                            for i in indices {
+                                size = size * i;
+                            }
+                            local_var_id = local_var_id + i64::try_from(size).unwrap();
+                            ptr = *next;
                         }
-                        local_table.insert(
-                            var,
-                            LSymbol::Var {
-                                vartype: vart.clone(),
-                                varid: local_var_id,
-                                varindices: indices.clone(),
-                            },
-                        );
-                        let mut size = 1;
-                        for i in indices {
-                            size = size * i;
+                        VarList::Null => {
+                            break;
                         }
-                        local_var_id = local_var_id + i64::try_from(size).unwrap();
-                        ptr = *next;
-                    }
-                    VarList::Null => {
-                        break;
                     }
                 }
             }
+            _ => exit_on_err("Invalid declaration in function ".to_owned()),
         }
-        _ => exit_on_err("Invalid declaration in function ".to_owned() + fname.as_str()),
     }
 }
 /*
@@ -402,14 +403,6 @@ pub fn __gen_global_symbol_table(declnode: &ASTNode) {
             paramlist: plist,
         } => {
             let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
-
-            if gst.contains_key(fname) == true {
-                log::error!(
-                    "Function name: [{}] is already declared as a variable or function",
-                    fname
-                );
-                std::process::exit(1);
-            }
 
             gst.insert(fname.to_string(), {
                 GSymbol::Func {

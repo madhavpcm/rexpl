@@ -1,5 +1,6 @@
 use crate::codegen::*;
 use crate::parserlib::*;
+use std::collections::LinkedList;
 pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
     match node {
         ASTNode::STR(_) => Ok(ASTExprType::String),
@@ -240,34 +241,36 @@ pub fn getvarindices(name: &String) -> Result<Vec<usize>, ()> {
         }
     }
 }
-pub fn get_ldecl_storage(decl: &ASTNode) -> usize {
+pub fn get_ldecl_storage(decllist: &Box<LinkedList<ASTNode>>) -> usize {
     let mut size = 0;
-    match decl {
-        ASTNode::DeclNode { var_type, list } => {
-            let mut ptr = &**list;
-            loop {
-                match ptr {
-                    VarList::Node {
-                        var,
-                        refr,
-                        indices,
-                        next,
-                    } => {
-                        let mut varsize = 1;
-                        for i in indices {
-                            varsize = varsize * i;
+    for i in decllist.iter() {
+        match i {
+            ASTNode::DeclNode { var_type, list } => {
+                let mut ptr = &**list;
+                loop {
+                    match ptr {
+                        VarList::Node {
+                            var,
+                            refr,
+                            indices,
+                            next,
+                        } => {
+                            let mut varsize = 1;
+                            for i in indices {
+                                varsize = varsize * i;
+                            }
+                            size += varsize;
+                            ptr = &**next;
                         }
-                        size += varsize;
-                        ptr = &**next;
-                    }
-                    VarList::Null => {
-                        break;
+                        VarList::Null => {
+                            break;
+                        }
                     }
                 }
             }
-        }
-        _ => {
-            panic!("err");
+            _ => {
+                panic!("err");
+            }
         }
     }
     size
@@ -348,10 +351,7 @@ pub fn getvartype(name: &String) -> Result<ASTExprType, ()> {
                     vartype,
                     varid: _,
                     varindices: _,
-                } => {
-                    log::info!("got var {} in localsymbol table", name);
-                    Ok(vartype.clone())
-                }
+                } => Ok(vartype.clone()),
                 LSymbol::Null => Ok(ASTExprType::Null),
             }
         } else {
@@ -362,10 +362,7 @@ pub fn getvartype(name: &String) -> Result<ASTExprType, ()> {
                         vartype,
                         varid: _,
                         varindices: _,
-                    } => {
-                        log::info!("got var {} in globalsymbol table", name);
-                        Ok(vartype.clone())
-                    }
+                    } => Ok(vartype.clone()),
                     _ => Ok(ASTExprType::Null),
                 }
             } else {
@@ -380,10 +377,7 @@ pub fn getvartype(name: &String) -> Result<ASTExprType, ()> {
                     vartype,
                     varid: _,
                     varindices: _,
-                } => {
-                    log::info!("got var {} in globalsymbol table", name);
-                    Ok(vartype.clone())
-                }
+                } => Ok(vartype.clone()),
                 _ => Ok(ASTExprType::Null),
             }
         } else {
@@ -626,23 +620,28 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
         },
         ASTNode::FuncCallNode { fname, arglist } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            let p;
             if let Some(entry) = gst.get(fname) {
                 match entry {
                     GSymbol::Func {
-                        ret_type,
+                        ret_type: _,
                         paramlist,
-                        flabel,
-                    } => Ok(compare_arglist_paramlist(arglist, paramlist)),
-                    _ => Ok(false),
+                        flabel: _,
+                    } => {
+                        p = paramlist.clone();
+                    }
+                    _ => return Ok(false),
                 }
             } else {
-                Ok(true)
+                return Ok(false);
             }
+            std::mem::drop(gst);
+            Ok(compare_arglist_paramlist(arglist, &*p))
         }
         ASTNode::FuncDeclNode {
             fname,
-            ret_type,
-            paramlist,
+            ret_type: _,
+            paramlist: _,
         } => {
             if fname.as_str() == "main" {
                 exit_on_err("`main` cannot be redeclared".to_owned());
@@ -658,23 +657,23 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
         }
         ASTNode::FuncDefNode {
             fname,
-            ret_type,
+            ret_type: _,
             paramlist: a,
-            decl,
-            body,
+            decl: _,
+            body: _,
         } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(entry) = gst.get(fname) {
                 match entry {
                     GSymbol::Var {
-                        vartype,
-                        varid,
-                        varindices,
+                        vartype: _,
+                        varid: _,
+                        varindices: _,
                     } => Ok(false),
                     GSymbol::Func {
-                        ret_type,
+                        ret_type: _,
                         paramlist: b,
-                        flabel,
+                        flabel: _,
                     } => Ok(compare_paramlist_paramlist(a, &*b)),
                     _ => Ok(false),
                 }
@@ -737,9 +736,9 @@ pub fn validate_arglist(fname: &String, arglist: &ArgList) -> Result<bool, ()> {
     if let Some(functable) = gst.get(fname) {
         match functable {
             GSymbol::Func {
-                ret_type,
+                ret_type: _,
                 paramlist,
-                flabel,
+                flabel: _,
             } => Ok(compare_arglist_paramlist(arglist, paramlist)),
             _ => Err(exit_on_err(
                 fname.clone() + " is declared as variable, not a function",
@@ -755,8 +754,8 @@ pub fn get_function_label(fname: &String) -> usize {
     if let Some(entry) = gst.get(fname) {
         return match entry {
             GSymbol::Func {
-                ret_type,
-                paramlist,
+                ret_type: _,
+                paramlist: _,
                 flabel,
             } => flabel.clone(),
             _ => LABEL_NOT_FOUND,
