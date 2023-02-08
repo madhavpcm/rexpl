@@ -13,7 +13,6 @@ lazy_static! {
     pub static ref GLOBALSYMBOLTABLE: Mutex<HashMap<String, GSymbol>> =
         Mutex::new(HashMap::default());
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
-    pub static ref LOCAL_VARID: Mutex<i64> = Mutex::new(0);
 }
 #[derive(Debug, Clone)]
 pub enum GSymbol {
@@ -176,6 +175,10 @@ pub enum ASTNode {
     ReturnNode {
         expr: Box<ASTNode>,
     },
+    MainNode {
+        decl: Box<ASTNode>,
+        body: Box<ASTNode>,
+    },
     BreakNode,
     ContinueNode,
     Null,
@@ -243,7 +246,7 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
     };
     return vartype;
 }
-/*
+/*64
  * Function to check if a condition expression returns boolean
  */
 pub fn __gen_local_symbol_table(declnode: &ASTNode, paramlist: &ParamList) {
@@ -254,7 +257,7 @@ pub fn __gen_local_symbol_table(declnode: &ASTNode, paramlist: &ParamList) {
     let fs = FUNCTION_STACK.lock().unwrap();
     let fname = fs.last().unwrap();
 
-    let mut local_var_id = LOCAL_VARID.lock().unwrap();
+    let mut local_var_id: i64 = 0;
     let mut param_offset: i64 = -2;
 
     let mut paramptr = paramlist;
@@ -364,7 +367,7 @@ pub fn __gen_local_symbol_table(declnode: &ASTNode, paramlist: &ParamList) {
                             var,
                             LSymbol::Var {
                                 vartype: vart.clone(),
-                                varid: *local_var_id,
+                                varid: local_var_id,
                                 varindices: indices.clone(),
                             },
                         );
@@ -372,7 +375,7 @@ pub fn __gen_local_symbol_table(declnode: &ASTNode, paramlist: &ParamList) {
                         for i in indices {
                             size = size * i;
                         }
-                        *local_var_id = *local_var_id + i64::try_from(size).unwrap();
+                        local_var_id = local_var_id + i64::try_from(size).unwrap();
                         ptr = *next;
                     }
                     VarList::Null => {

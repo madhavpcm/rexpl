@@ -1,5 +1,6 @@
 %start Start 
 %avoid_insert "INT"
+%avoid_insert "MAIN"
 %avoid_insert "STR"
 %avoid_insert "SINGLE_COMMENT"
 %avoid_insert "MULTI_COMMENT"
@@ -19,9 +20,9 @@
 %token "VAR"
 %token "BREAK"
 %token "CONTINUE"
+%token "MAIN"
 %token "DECL"
 %token "ENDDECL"
-%token "MAIN"
 %token "RETURN"
 %token ";"
 %token "="
@@ -65,18 +66,55 @@ Start -> Result<ASTNode, ()>:
     }
 	;
 MainBlock -> Result<ASTNode,()>:
-	"INT" "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
+	"INT_T" "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
-			
+		let mut ss = SCOPE_STACK.lock().unwrap();
+		let mut fs = FUNCTION_STACK.lock().unwrap();
+		fs.push("main".to_string());
+		ss.push(HashMap::default().clone());
+		log::info!("before size ofscope : {}", ss.last().unwrap().len());
+
+		std::mem::drop(ss);
+		std::mem::drop(fs);
+
+		log::info!("main()");
+		let ldecl_ = $6.map_err(|_| ())?;
+		let body_ = $7.map_err(|_| ())?;
+		__gen_local_symbol_table(&ldecl_, &ParamList::Null);
+
+		let node = ASTNode::MainNode{
+			decl: Box::new(ldecl_),
+			body: Box::new(body_),
+		};
+
+		let mut ss =SCOPE_STACK.lock().unwrap();
+		log::info!("before size ofscope : {}", ss.last().unwrap().len());
+		let mut ft = FUNCTION_TABLE.lock().unwrap();
+		ft.insert(
+			"main".to_string(),
+			ss.last().unwrap().clone()
+		);
+    log::info!("in the end size ofscope : {}", ss.len());
+		ss.pop();
+		Ok(node)
 	}
 	;
 BeginBlock -> Result<ASTNode,()>:
-	"BEGIN" StmtList "END" ';'
+	"BEGIN" StmtList "END" 
 	{
+		let ss = SCOPE_STACK.lock().unwrap();
+		if let Some(sz) = ss.last() {
+			log::info!("before size ofscope : {}", sz.len());
+		}
+		else{
+			log::error!("err {}" , ss.len());
+		}
+		std::mem::drop(ss);
 		$2
 	}
-	| "BEGIN" "END" ';'
+	| "BEGIN" "END" 
 	{
+		log::error!("Empty beginend");
 		Ok(ASTNode::Null)
 	}
 	;
@@ -96,7 +134,6 @@ LDeclList -> Result<ASTNode, ()>:
 	{
 		let decl = $2?;
 
-		__gen_local_symbol_table(&decl,&ParamList::Null);
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Null),
@@ -108,7 +145,6 @@ LDeclList -> Result<ASTNode, ()>:
 	LDecl
 	{
 		let decl =$1?;
-		__gen_local_symbol_table(&decl,&ParamList::Null);
 		Ok(decl)
 	}
 	;
@@ -156,26 +192,64 @@ GDecl ->  Result<ASTNode,()>:
 	| Type "VAR" '(' ParamList ')' ';'
 	{
 		let returntype = $1?;
-		let v = $3.map_err(|_| ())?;
+		let v = $2.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
+		let paramlist = $4?;
 
-		Ok(ASTNode::FuncDeclNode{
-			fname: functionname,
+		let node = ASTNode::FuncDeclNode{
+			fname: functionname.clone(),
 			ret_type: returntype,
-			paramlist: Box::new($4?),
-		})
+			paramlist: Box::new(paramlist.clone()),
+		};
+
+		if validate_ast_node(&node) == Ok(false){
+			return Ok(ASTNode::ErrorNode{
+                err : ASTError::TypeError("Function [".to_owned() + functionname.as_str() + "] is redeclared."),
+            });
+		}
+
+		let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+		gst.insert(
+			functionname.clone(),
+			GSymbol::Func {
+				ret_type: (returntype.clone()),
+				paramlist: Box::new(paramlist),
+				flabel: (0),
+			},
+		);
+
+		Ok(node)
 	}
 	| PtrType "VAR" '(' ParamList ')' ';'
 	{
 		let returntype = $1?;
-		let v = $3.map_err(|_| ())?;
+		let v = $2.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
+		let paramlist = $4?;
 
-		Ok(ASTNode::FuncDeclNode{
-			fname: functionname,
+		let node = ASTNode::FuncDeclNode{
+			fname: functionname.clone(),
 			ret_type: returntype,
-			paramlist: Box::new($4?),
-		})
+			paramlist: Box::new(paramlist.clone()),
+		};
+
+		if validate_ast_node(&node) == Ok(false){
+			return Ok(ASTNode::ErrorNode{
+                err : ASTError::TypeError("Function [".to_owned() + functionname.as_str() + "] is redeclared."),
+            });
+		}
+
+		let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+		gst.insert(
+			functionname.clone(),
+			GSymbol::Func {
+				ret_type: (returntype.clone()),
+				paramlist: Box::new(paramlist),
+				flabel: (0),
+			},
+		);
+
+		Ok(node)
 	}
 	;
 
@@ -290,16 +364,15 @@ FDef -> Result<ASTNode,()>:
 
 		let mut ss = SCOPE_STACK.lock().unwrap();
 		let mut fs = FUNCTION_STACK.lock().unwrap();
-		let mut lv = LOCAL_VARID.lock().unwrap();
-		*lv = 0;
 		fs.push(funcname.clone());
 		ss.push(HashMap::default());
+		log::info!("()");
 
 		std::mem::drop(ss);
-		std::mem::drop(lv);
 		std::mem::drop(gst);
 		std::mem::drop(fs);
 
+		log::info!("asdf");
 		let ldecl_ = $7?;
 		let paramlist_ = $4?;
 
@@ -323,7 +396,7 @@ FDef -> Result<ASTNode,()>:
 
 		Ok(node)
 	}
-	| Type "VAR" '(' ParamList ')' '{' LDeclBlock StmtList '}'
+	| Type "VAR" '(' ParamList ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| ())?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
@@ -337,27 +410,26 @@ FDef -> Result<ASTNode,()>:
 
 		let mut ss = SCOPE_STACK.lock().unwrap();
 		let mut fs = FUNCTION_STACK.lock().unwrap();
-		let mut lv = LOCAL_VARID.lock().unwrap();
-		*lv = 0;
 		fs.push(funcname.clone());
-		ss.push(HashMap::default());
+		ss.push(HashMap::default().clone());
 
 		std::mem::drop(ss);
-		std::mem::drop(lv);
 		std::mem::drop(gst);
 		std::mem::drop(fs);
 
+		log::info!("sadf");
 		let ldecl_ = $7?;
 		let paramlist_ = $4?;
 
 		__gen_local_symbol_table(&ldecl_, &paramlist_ );
 
+		let body_ = $8?;
 		let node = ASTNode::FuncDefNode{
 			fname: funcname.clone(),
 			ret_type: $1?,
 			paramlist: Box::new(paramlist_),
 			decl: Box::new(ldecl_),
-			body: Box::new($8?),
+			body: Box::new(body_),
 		};
 
 		let mut ss =SCOPE_STACK.lock().unwrap();
@@ -375,10 +447,12 @@ FDef -> Result<ASTNode,()>:
 LDeclBlock -> Result<ASTNode,()>:
 	"DECL" LDeclList "ENDDECL"
 	{
+		log::warn!("ss");
 	    $2
 	}
 	| "DECL" "ENDDECL"
 	{
+		log::warn!("Empty Declaration");
         Ok(ASTNode::Null)
 	}
 	;
@@ -416,7 +490,7 @@ Param -> Result<ParamList,()>:
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
 				if indices != Vec::default() {
-					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned())
+					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned());
 				}
 				Ok(ParamList::Node{
 					var:var,
@@ -439,7 +513,7 @@ Param -> Result<ParamList,()>:
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
 				if indices != Vec::default() {
-					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned())
+					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned());
 				}
 				Ok(ParamList::Node{
 					var:var,
@@ -454,6 +528,10 @@ Param -> Result<ParamList,()>:
 		}
         
     }
+	| 
+	{
+		Ok(ParamList::Null)
+	}
 	;
 
 
@@ -729,7 +807,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at >".to_owned()),
             });
 		}
 
@@ -753,7 +831,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at <=".to_owned()),
             });
 		}
 
@@ -777,7 +855,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at >=".to_owned()),
             });
 		}
 
@@ -801,7 +879,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at !=".to_owned()),
             });
 		}
 
@@ -825,7 +903,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at ==".to_owned()),
             });
 		}
 
@@ -849,7 +927,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at +".to_owned()),
             });
 		}
 
@@ -873,7 +951,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at -".to_owned()),
             });
 		}
 
@@ -896,7 +974,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at *".to_owned()),
             });
 		}
 
@@ -920,7 +998,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at /".to_owned()),
             });
 		}
 
@@ -944,7 +1022,7 @@ Expr -> Result<ASTNode,()>:
 
 		if validate_ast_node(&node) == Ok(false) {
 			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected a boolean expression in while do".to_owned()),
+                err : ASTError::TypeError("Type error at %".to_owned()),
             });
 		}
 
@@ -964,7 +1042,6 @@ Expr -> Result<ASTNode,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let str = parse_string($lexer.span_str(v.span())).unwrap();
-		log::info!("String detected: {}",str);
 		Ok(ASTNode::STR(str))
 	}
 	| VariableExpr
@@ -978,7 +1055,7 @@ Expr -> Result<ASTNode,()>:
 
 		let node = ASTNode::FuncCallNode{
 			fname: functionname, 
-			paramlist: Box::new(ArgList::Null),
+			arglist: Box::new(ArgList::Null),
 		};
 
 		if validate_ast_node(&node) == Ok(false) {
@@ -991,13 +1068,14 @@ Expr -> Result<ASTNode,()>:
 	}
 	| "VAR" '(' ArgList ')'
 	{
+		log::info!("arglist");
 		let v = $1.map_err(|_| ())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
 
 		
 		let node = ASTNode::FuncCallNode{
 			fname: functionname, 
-			paramlist: Box::new($3?),
+			arglist: Box::new($3?),
 		};
 
 		if validate_ast_node(&node) == Ok(false) {
@@ -1107,4 +1185,5 @@ use crate::parserlib::{*};
 use crate::validation::{*};
 use crate::codegen::SCOPE_STACK;
 use crate::codegen::FUNCTION_STACK;
+use crate::codegen::exit_on_err;
 use std::collections::HashMap;

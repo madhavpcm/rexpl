@@ -15,6 +15,7 @@ use std::sync::Mutex;
 //recursive call
 const MAX_REGISTERS: usize = 21;
 const XSM_STACK_OFFSET: i64 = 4096;
+pub const LABEL_NOT_FOUND: usize = 10000;
 
 lazy_static! {
     pub static ref REGISTERS: Mutex<Vec<(bool, i64)>> = Mutex::new(vec![(false, 0); MAX_REGISTERS]);
@@ -61,6 +62,90 @@ pub fn free_reg(register: usize) -> u64 {
  * Meta function which recursively generates assembly lines
  * in xsm for arithmetic operations
  */
+fn __load_variable(mut file: &File, vname: &String) -> usize {
+    let ss = SCOPE_STACK.lock().unwrap();
+    if let Some(lst) = ss.last() {
+        if let Some(entry) = lst.get(vname) {
+            match entry {
+                LSymbol::Var {
+                    vartype,
+                    varid,
+                    varindices: _,
+                } => {
+                    let vreg = get_reg();
+                    if let Err(e) = writeln!(file, "MOV R{}, BP", vreg) {
+                        exit_on_err(e.to_string())
+                    }
+                    if *varid < 0 {
+                        if let Err(e) = writeln!(file, "SUB R{}, {}", vreg, -1 * varid) {
+                            exit_on_err(e.to_string())
+                        }
+                    } else {
+                        if let Err(e) = writeln!(file, "ADD R{}, {}", vreg, varid) {
+                            exit_on_err(e.to_string())
+                        }
+                    }
+                    if let Err(e) = writeln!(file, "MOV R{}, [R{}]", vreg, vreg) {
+                        exit_on_err(e.to_string())
+                    }
+                    vreg
+                }
+                _ => {
+                    exit_on_err("Error".to_string());
+                    0
+                }
+            }
+        } else {
+            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            if let Some(entry) = gst.get(vname) {
+                match entry {
+                    GSymbol::Var {
+                        vartype: _,
+                        varid,
+                        varindices: _,
+                    } => {
+                        let vreg = get_reg();
+                        if let Err(e) = writeln!(file, "MOV R{}, [{}]", vreg, varid) {
+                            exit_on_err(e.to_string())
+                        }
+                        vreg
+                    }
+                    _ => {
+                        exit_on_err("Error".to_string());
+                        0
+                    }
+                }
+            } else {
+                exit_on_err("Error".to_string());
+                0
+            }
+        }
+    } else {
+        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+        if let Some(entry) = gst.get(vname) {
+            match entry {
+                GSymbol::Var {
+                    vartype: _,
+                    varid,
+                    varindices: _,
+                } => {
+                    let vreg = get_reg();
+                    if let Err(e) = writeln!(file, "MOV R{}, [{}]", vreg, varid) {
+                        exit_on_err(e.to_string())
+                    }
+                    vreg
+                }
+                _ => {
+                    exit_on_err("Error".to_string());
+                    0
+                }
+            }
+        } else {
+            exit_on_err("Error".to_string());
+            0
+        }
+    }
+}
 fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
     match root {
         ASTNode::ErrorNode { err } => {
@@ -89,23 +174,18 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             register
         }
         ASTNode::VAR { name, indices } => {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if gst.contains_key(name) == false {
+            if varinscope(name) == Ok(false) {
                 exit_on_err("Variable : [".to_owned() + name.as_str() + "] is not declared");
             }
-            std::mem::drop(gst);
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
-            let baseaddrreg = get_reg();
+
+            let baseaddrreg = __load_variable(file, name);
 
             let mut registers = REGISTERS.lock().unwrap();
             registers[baseaddrreg].1 =
                 i64::try_from(XSM_STACK_OFFSET).unwrap() + i64::try_from(varid).unwrap();
             std::mem::drop(registers);
-
-            if let Err(e) = writeln!(file, "MOV R{}, {}", baseaddrreg, XSM_STACK_OFFSET + varid) {
-                exit_on_err(e.to_string());
-            }
 
             for i in 0..indices.len() {
                 match *indices[i] {
@@ -538,21 +618,115 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         if let Err(e) = writeln!(file, "PUSH R{}", retvaladdr) {
                             exit_on_err(e.to_string());
                         }
-                        free_reg(retval);
+                        free_reg(retvaladdr);
                         ptr = &**next;
                     }
                     ArgList::Null => break,
                 }
             }
+            let pushaddr = get_reg();
+            if let Err(e) = writeln!(file, "PUSH R{}\nPUSH R{}", pushaddr, pushaddr) {
+                exit_on_err(e.to_string());
+            }
+            free_reg(pushaddr);
+            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            if let Some(entry) = gst.get(fname) {
+                match entry {
+                    GSymbol::Func {
+                        ret_type,
+                        paramlist,
+                        flabel,
+                    } => {
+                        if let Err(e) = writeln!(file, "CALL L{}", flabel) {
+                            exit_on_err(e.to_string())
+                        }
+                    }
+                    _ => exit_on_err("Function not declared".to_string()),
+                }
+            }
         },
+        ASTNode::MainNode { decl, body } => {
+            //this node is traverse after all function def nodes,
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            let l = label_count.clone();
+            *label_count += 1;
+            //in case main() is recursively called, we need the label of main
+            gst.insert(
+                "main".to_string(),
+                GSymbol::Func {
+                    ret_type: (ASTExprType::Int),
+                    paramlist: Box::new(ParamList::Null),
+                    flabel: (l),
+                },
+            );
 
+            std::mem::drop(label_count);
+            //
+            //get the initial stack pointer location
+            let mut baseaddr = 4095;
+            for (_k, v) in gst.iter() {
+                match v {
+                    GSymbol::Var {
+                        vartype: _,
+                        varid: _,
+                        varindices,
+                    } => {
+                        let mut size = 1;
+                        for index in varindices {
+                            size *= index;
+                        }
+                        baseaddr = baseaddr + size;
+                    }
+                    _ => continue,
+                };
+            }
+            std::mem::drop(gst);
+            let ft = FUNCTION_TABLE.lock().unwrap();
+            if let Some(local_table) = ft.get("main") {
+                let mut ss = SCOPE_STACK.lock().unwrap();
+                ss.push(local_table.clone());
+                std::mem::drop(ss);
+                std::mem::drop(ft);
+
+                if let Err(e) = writeln!(file, "MOV SP, {}\nMOV BP,SP", baseaddr) {
+                    exit_on_err(e.to_string());
+                }
+                if let Err(e) = writeln!(file, "SUB SP, {}", get_ldecl_storage(decl)) {
+                    exit_on_err(e.to_string());
+                }
+                __code_gen(body, file, false);
+
+                let mut ss = SCOPE_STACK.lock().unwrap();
+                ss.pop();
+            } else {
+                exit_on_err("main not defined".to_string())
+            }
+            0
+        }
         ASTNode::FuncDeclNode {
-            fname: _,
-            ret_type: _,
-            paramlist: _,
-        } => 0,
+            fname,
+            ret_type,
+            paramlist,
+        } => {
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let l = label_count.clone();
+            *label_count += 1;
+            let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+
+            gst.insert(
+                fname.clone(),
+                GSymbol::Func {
+                    ret_type: (ret_type.clone()),
+                    paramlist: (paramlist.clone()),
+                    flabel: (l),
+                },
+            );
+
+            0
+        }
         /*
-         * L1:
+         * L{funclabel}:
          *    Subtract SP by declvars.size()
          *    <body>
          *    ret
@@ -564,24 +738,16 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             decl,
             body,
         } => {
-            let mut label_count = LABEL_COUNT.lock().unwrap();
-            let l = label_count.clone();
-            *label_count += 1;
-            //push bp
-            if let Err(e) = writeln!(file, "L{}:", l) {
+            if let Err(e) = writeln!(file, "L{}:\nPUSH BP\nMOV BP,SP", get_function_label(fname)) {
                 exit_on_err(e.to_string());
             }
-            if let Err(e) = writeln!(file, "PUSH BP") {
-                exit_on_err(e.to_string());
-            }
-            //new frame
-            if let Err(e) = writeln!(file, "MOV BP,SP") {
+            if let Err(e) = writeln!(file, "SUB SP, {}", get_ldecl_storage(decl)) {
                 exit_on_err(e.to_string());
             }
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(local_table) = ft.get(fname) {
                 let mut ss = SCOPE_STACK.lock().unwrap();
-                ss.push(local_table);
+                ss.push(local_table.clone());
                 std::mem::drop(ss);
                 std::mem::drop(ft);
 
@@ -752,28 +918,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
 fn __header_gen(mut file: &File) {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     log::info!("Global Symbol Table Size : {}", gst.len());
-    let mut baseaddr = 4095;
-    for (_k, v) in gst.iter() {
-        match v {
-            GSymbol::Var {
-                vartype: _,
-                varid: _,
-                varindices,
-            } => {
-                let mut size = 1;
-                for index in varindices {
-                    size *= index;
-                }
-                baseaddr = baseaddr + size;
-            }
-            _ => continue,
-        };
-    }
-    if let Err(e) = writeln!(
-        file,
-        "0\n2056\n0\n0\n0\n0\n0\n0\nMOV SP,{}\nMOV BP,SP",
-        baseaddr
-    ) {
+    if let Err(e) = writeln!(file, "0\n2056\n0\n0\n0\n0\n0\n0\n",) {
         exit_on_err(e.to_string());
     }
 }
