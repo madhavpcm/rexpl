@@ -79,8 +79,8 @@ MainBlock -> Result<ASTNode,()>:
 
 		log::info!("main()");
 		let ldecl_ = $6.map_err(|_| ())?;
-		let body_ = $7.map_err(|_| ())?;
 		__gen_local_symbol_table(&ldecl_, &ParamList::Null);
+		let body_ = $7.map_err(|_| ())?;
 
 		let node = ASTNode::MainNode{
 			decl: Box::new(ldecl_),
