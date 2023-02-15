@@ -1,15 +1,21 @@
 use crate::codegen::*;
 use crate::parserlib::*;
 use std::collections::LinkedList;
-pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
+pub fn getexprtype(node: &ASTNode) -> Option<ASTExprType> {
     match node {
-        ASTNode::STR(_) => Ok(ASTExprType::String),
-        ASTNode::INT(_) => Ok(ASTExprType::Int),
+        ASTNode::ErrorNode { err } => match err {
+            ASTError::TypeError(s) => {
+                exit_on_err(s.to_owned());
+                Some(ASTExprType::Null)
+            }
+        },
+        ASTNode::STR(_) => Some(ASTExprType::String),
+        ASTNode::INT(_) => Some(ASTExprType::Int),
         ASTNode::VAR { name, indices: _ } => getvartype(name),
         ASTNode::UnaryNode { op, ptr } => match op {
             ASTNodeType::Deref => getexprtype(ptr),
             ASTNodeType::Ref => getexprtype(ptr),
-            _ => Ok(ASTExprType::Null),
+            _ => Some(ASTExprType::Null),
         },
         ASTNode::BinaryNode {
             op,
@@ -28,9 +34,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 } else {
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 }
             }
             ASTNodeType::Gte => {
@@ -44,9 +50,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 } else {
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 }
             }
             ASTNodeType::Lt => {
@@ -60,9 +66,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 } else {
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 }
             }
             ASTNodeType::Lte => {
@@ -76,9 +82,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 } else {
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 }
             }
             ASTNodeType::Ne => {
@@ -93,9 +99,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::String, ASTExprType::String) => ASTExprType::Bool,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 } else {
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 }
             }
             ASTNodeType::Ee => {
@@ -110,9 +116,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::String, ASTExprType::String) => ASTExprType::Bool,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 } else {
-                    Ok(exprtype.unwrap())
+                    Some(exprtype.unwrap())
                 }
             }
             ASTNodeType::Mod => {
@@ -124,9 +130,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 } else {
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 }
             }
             ASTNodeType::Slash => {
@@ -138,9 +144,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 } else {
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 }
             }
             ASTNodeType::Star => {
@@ -152,9 +158,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 } else {
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 }
             }
             ASTNodeType::Minus => {
@@ -170,9 +176,9 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::Int, ASTExprType::StringRef) => ASTExprType::StringRef,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 } else {
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 }
             }
             ASTNodeType::Plus => {
@@ -188,70 +194,63 @@ pub fn getexprtype(node: &ASTNode) -> Result<ASTExprType, ()> {
                         (ASTExprType::Int, ASTExprType::StringRef) => ASTExprType::StringRef,
                         _ => ASTExprType::Null,
                     });
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 } else {
-                    Ok(exprtype.unwrap().clone())
+                    Some(exprtype.unwrap().clone())
                 }
             }
-            _ => Ok(ASTExprType::Null),
+            _ => None,
         },
-        _ => Ok(ASTExprType::Null),
-    }
-}
-pub fn getvarindices(name: &String) -> Result<Vec<usize>, ()> {
-    let ss = SCOPE_STACK.lock().unwrap();
-    if let Some(lst) = ss.last() {
-        if let Some(entry) = lst.get(name) {
-            match entry {
-                LSymbol::Var {
-                    vartype: _,
-                    varid: _,
-                    varindices,
-                } => Ok(varindices.clone()),
-                LSymbol::Null => Err(()),
-            }
-        } else {
+        ASTNode::FuncCallNode { fname, arglist } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(entry) = gst.get(name) {
+            if let Some(entry) = gst.get(fname) {
                 match entry {
-                    GSymbol::Var {
-                        vartype: _,
-                        varid: _,
-                        varindices,
-                    } => Ok(varindices.clone()),
-                    _ => Err(()),
+                    GSymbol::Func {
+                        ret_type,
+                        paramlist: _,
+                        flabel: _,
+                    } => Some(ret_type.clone()),
+                    _ => None,
                 }
             } else {
-                Err(())
+                None
             }
         }
-    } else {
-        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-        if let Some(entry) = gst.get(name) {
-            match entry {
-                GSymbol::Var {
-                    vartype: _,
-                    varid: _,
-                    varindices,
-                } => Ok(varindices.clone()),
-                _ => Err(()),
-            }
-        } else {
-            Err(())
-        }
+        _ => None,
     }
+}
+pub fn getvarindices(name: &String) -> Option<Vec<usize>> {
+    let lst = LOCALSYMBOLTABLE.lock().unwrap();
+    if let Some(LSymbol::Var {
+        vartype,
+        varid,
+        varindices,
+    }) = lst.get(name)
+    {
+        return Some(varindices.clone());
+    }
+    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    if let Some(GSymbol::Var {
+        vartype,
+        varid,
+        varindices,
+    }) = gst.get(name)
+    {
+        return Some(varindices.clone());
+    }
+    None
 }
 pub fn get_ldecl_storage(decllist: &Box<LinkedList<ASTNode>>) -> usize {
     let mut size = 0;
     for i in decllist.iter() {
         match i {
-            ASTNode::DeclNode { var_type, list } => {
+            ASTNode::DeclNode { var_type: _, list } => {
                 let mut ptr = &**list;
                 loop {
                     match ptr {
                         VarList::Node {
-                            var,
-                            refr,
+                            var: _,
+                            refr: _,
                             indices,
                             next,
                         } => {
@@ -275,146 +274,68 @@ pub fn get_ldecl_storage(decllist: &Box<LinkedList<ASTNode>>) -> usize {
     }
     size
 }
-pub fn get_paramlist_storage(paramlist: &ParamList) -> usize {
-    let mut size = 0;
-    let mut ptr = paramlist;
-    loop {
-        match ptr {
-            ParamList::Node {
-                var: _,
-                vartype: _,
-                indices,
-                next,
-            } => {
-                let mut varsize = 1;
-                for i in indices {
-                    varsize = varsize * i;
-                }
-                size += varsize;
-                ptr = &**next;
-            }
-            ParamList::Null => break,
-        }
-    }
-    size
-}
 
-pub fn getvarid(name: &String) -> Result<i64, ()> {
-    let ss = SCOPE_STACK.lock().unwrap();
-    if let Some(lst) = ss.last() {
-        if let Some(entry) = lst.get(name) {
-            match entry {
-                LSymbol::Var {
-                    vartype: _,
-                    varid,
-                    varindices: _,
-                } => Ok(varid.clone()),
-                LSymbol::Null => Err(()),
-            }
-        } else {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(entry) = gst.get(name) {
-                match entry {
-                    GSymbol::Var {
-                        vartype: _,
-                        varid,
-                        varindices: _,
-                    } => Ok(i64::try_from(varid.clone()).unwrap()),
-                    _ => Err(()),
-                }
-            } else {
-                Err(())
-            }
-        }
-    } else {
-        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-        if let Some(entry) = gst.get(name) {
-            match entry {
-                GSymbol::Var {
-                    vartype: _,
-                    varid,
-                    varindices: _,
-                } => Ok(i64::try_from(varid.clone()).unwrap()),
-                _ => Err(()),
-            }
-        } else {
-            Err(())
-        }
+pub fn getvarid(name: &String) -> Option<i64> {
+    let lst = LOCALSYMBOLTABLE.lock().unwrap();
+    if let Some(LSymbol::Var {
+        vartype,
+        varid,
+        varindices,
+    }) = lst.get(name)
+    {
+        return Some(*varid);
     }
+    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    if let Some(GSymbol::Var {
+        vartype,
+        varid,
+        varindices,
+    }) = gst.get(name)
+    {
+        return Some(i64::try_from(*varid).unwrap());
+    }
+    None
 }
-pub fn getvartype(name: &String) -> Result<ASTExprType, ()> {
-    let ss = SCOPE_STACK.lock().unwrap();
-    if let Some(lst) = ss.last() {
-        if let Some(entry) = lst.get(name) {
-            match entry {
-                LSymbol::Var {
-                    vartype,
-                    varid: _,
-                    varindices: _,
-                } => Ok(vartype.clone()),
-                LSymbol::Null => Ok(ASTExprType::Null),
-            }
-        } else {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(entry) = gst.get(name) {
-                match entry {
-                    GSymbol::Var {
-                        vartype,
-                        varid: _,
-                        varindices: _,
-                    } => Ok(vartype.clone()),
-                    _ => Ok(ASTExprType::Null),
-                }
-            } else {
-                Ok(ASTExprType::Null)
-            }
-        }
-    } else {
-        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-        if let Some(entry) = gst.get(name) {
-            match entry {
-                GSymbol::Var {
-                    vartype,
-                    varid: _,
-                    varindices: _,
-                } => Ok(vartype.clone()),
-                _ => Ok(ASTExprType::Null),
-            }
-        } else {
-            Ok(ASTExprType::Null)
-        }
+pub fn getvartype(name: &String) -> Option<ASTExprType> {
+    let lst = LOCALSYMBOLTABLE.lock().unwrap();
+    if let Some(LSymbol::Var {
+        vartype,
+        varid,
+        varindices,
+    }) = lst.get(name)
+    {
+        return Some(*vartype);
     }
+    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    if let Some(GSymbol::Var {
+        vartype,
+        varid,
+        varindices,
+    }) = gst.get(name)
+    {
+        return Some(*vartype);
+    }
+    None
 }
 pub fn varinscope(name: &String) -> Result<bool, ()> {
-    let ss = SCOPE_STACK.lock().unwrap();
-    if let Some(lst) = ss.last() {
-        if let Some(_entry) = lst.get(name) {
-            Ok(true)
-        } else {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(entry) = gst.get(name) {
-                match entry {
-                    GSymbol::Var {
-                        vartype: _,
-                        varid: _,
-                        varindices: _,
-                    } => Ok(true),
-                    _ => Ok(false),
-                }
-            } else {
-                Ok(false)
-            }
-        }
+    let lst = LOCALSYMBOLTABLE.lock().unwrap();
+    if lst.contains_key(name) {
+        Ok(true)
     } else {
         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
         if let Some(entry) = gst.get(name) {
             match entry {
+                GSymbol::Null => Ok(false),
                 GSymbol::Var {
                     vartype: _,
                     varid: _,
                     varindices: _,
                 } => Ok(true),
-                _ => Ok(false),
+                GSymbol::Func {
+                    ret_type: _,
+                    paramlist: _,
+                    flabel: _,
+                } => Ok(false),
             }
         } else {
             Ok(false)
@@ -448,13 +369,13 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
             list: _,
         } => Ok(true),
         ASTNode::WhileNode { expr, xdo: _ } => {
-            if getexprtype(&expr) != Ok(ASTExprType::Bool) {
+            if getexprtype(&expr) != Some(ASTExprType::Bool) {
                 exit_on_err("Invalid Expression inside while".to_owned())
             }
             Ok(true)
         }
         ASTNode::IfNode { expr, xif: _ } => {
-            if getexprtype(&expr) != Ok(ASTExprType::Bool) {
+            if getexprtype(&expr) != Some(ASTExprType::Bool) {
                 exit_on_err("Invalid Expression inside if".to_owned());
             }
             Ok(true)
@@ -464,7 +385,7 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
             xif: _,
             xelse: _,
         } => {
-            if getexprtype(&expr) != Ok(ASTExprType::Bool) {
+            if getexprtype(&expr) != Some(ASTExprType::Bool) {
                 exit_on_err("Invalid Expression inside if".to_owned());
             }
             Ok(true)
@@ -530,8 +451,8 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
             rhs,
         } => match op {
             ASTNodeType::Equals => {
-                let lhs_t = getexprtype(lhs)?;
-                let rhs_t = getexprtype(rhs)?;
+                let lhs_t = getexprtype(lhs);
+                let rhs_t = getexprtype(rhs);
 
                 if lhs_t == rhs_t {
                     Ok(true)
@@ -540,77 +461,77 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
                 }
             }
             ASTNodeType::Gt => {
-                if getexprtype(node) != Ok(ASTExprType::Bool) {
+                if getexprtype(node) != Some(ASTExprType::Bool) {
                     Ok(false)
                 } else {
                     Ok(true)
                 }
             }
             ASTNodeType::Gte => {
-                if getexprtype(node) != Ok(ASTExprType::Bool) {
+                if getexprtype(node) != Some(ASTExprType::Bool) {
                     Ok(false)
                 } else {
                     Ok(true)
                 }
             }
             ASTNodeType::Lt => {
-                if getexprtype(node) != Ok(ASTExprType::Bool) {
+                if getexprtype(node) != Some(ASTExprType::Bool) {
                     Ok(false)
                 } else {
                     Ok(true)
                 }
             }
             ASTNodeType::Lte => {
-                if getexprtype(node) != Ok(ASTExprType::Bool) {
+                if getexprtype(node) != Some(ASTExprType::Bool) {
                     Ok(false)
                 } else {
                     Ok(true)
                 }
             }
             ASTNodeType::Ee => {
-                if getexprtype(node) != Ok(ASTExprType::Bool) {
+                if getexprtype(node) != Some(ASTExprType::Bool) {
                     Ok(false)
                 } else {
                     Ok(true)
                 }
             }
             ASTNodeType::Ne => {
-                if getexprtype(node) != Ok(ASTExprType::Bool) {
+                if getexprtype(node) != Some(ASTExprType::Bool) {
                     Ok(false)
                 } else {
                     Ok(true)
                 }
             }
             ASTNodeType::Plus => {
-                if getexprtype(node) != Ok(ASTExprType::Null) {
+                if getexprtype(node) != None {
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
             ASTNodeType::Minus => {
-                if getexprtype(node) != Ok(ASTExprType::Null) {
+                if getexprtype(node) != None {
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
             ASTNodeType::Star => {
-                if getexprtype(node) != Ok(ASTExprType::Null) {
+                if getexprtype(node) != None {
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
             ASTNodeType::Slash => {
-                if getexprtype(node) != Ok(ASTExprType::Null) {
+                if getexprtype(node) != None {
                     Ok(true)
                 } else {
                     Ok(false)
                 }
             }
             ASTNodeType::Mod => {
-                if getexprtype(node) != Ok(ASTExprType::Null) {
+                if getexprtype(node) != None {
                     Ok(true)
                 } else {
                     Ok(false)
@@ -624,7 +545,7 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
             if let Some(entry) = gst.get(fname) {
                 match entry {
                     GSymbol::Func {
-                        ret_type: _,
+                        ret_type,
                         paramlist,
                         flabel: _,
                     } => {
@@ -636,7 +557,7 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
                 return Ok(false);
             }
             std::mem::drop(gst);
-            Ok(compare_arglist_paramlist(arglist, &*p))
+            Ok(compare_arglist_paramlist(arglist, &p))
         }
         ASTNode::FuncDeclNode {
             fname,
@@ -657,7 +578,7 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
         }
         ASTNode::FuncDefNode {
             fname,
-            ret_type: _,
+            ret_type: r1,
             paramlist: a,
             decl: _,
             body: _,
@@ -671,10 +592,10 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
                         varindices: _,
                     } => Ok(false),
                     GSymbol::Func {
-                        ret_type: _,
+                        ret_type: r2,
                         paramlist: b,
                         flabel: _,
-                    } => Ok(compare_paramlist_paramlist(a, &*b)),
+                    } => Ok((&**a == b) && (r1 == r2)),
                     _ => Ok(false),
                 }
             } else {
@@ -684,54 +605,27 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
         _ => Ok(true),
     }
 }
-pub fn compare_paramlist_paramlist(decl: &ParamList, def: &ParamList) -> bool {
-    match (decl, def) {
-        (
-            ParamList::Node {
-                var: a,
-                vartype: b,
-                indices: c,
-                next: d,
-            },
-            ParamList::Node {
-                var: e,
-                vartype: f,
-                indices: g,
-                next: h,
-            },
-        ) => {
-            if a == e && b == f && c == g {
-                compare_paramlist_paramlist(d, h)
-            } else {
-                false
-            }
-        }
-        (ParamList::Null, ParamList::Null) => true,
-        _ => false,
+/*
+ * Function to validate the pamalist in declaration to definition
+ */
+fn compare_arglist_paramlist(arglist: &LinkedList<ASTNode>, paramlist: &LinkedList<Param>) -> bool {
+    if arglist.len() != paramlist.len() {
+        return false;
     }
-}
-fn compare_arglist_paramlist(arglist: &ArgList, paramlist: &ParamList) -> bool {
-    match (arglist, paramlist) {
-        (
-            ArgList::Node { expr, next: anext },
-            ParamList::Node {
-                var: _,
-                vartype,
-                indices: _,
-                next: pnext,
-            },
-        ) => {
-            if &getexprtype(expr).unwrap() != vartype {
-                return false;
-            }
-            compare_arglist_paramlist(anext, pnext)
-        }
-        (ArgList::Null, ParamList::Null) => true,
-        _ => false,
-    }
-}
+    let mut aiter = arglist.iter();
+    let mut piter = paramlist.iter();
 
-pub fn validate_arglist(fname: &String, arglist: &ArgList) -> Result<bool, ()> {
+    while let (Some(arg), Some(param)) = (aiter.next(), piter.next()) {
+        if getexprtype(arg).unwrap() != param.vartype {
+            return false;
+        }
+    }
+    true
+}
+/*
+ * Function to validate the type of argument list to paramlist
+ */
+pub fn validate_arglist(fname: &String, arglist: &LinkedList<ASTNode>) -> Result<bool, ()> {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(functable) = gst.get(fname) {
         match functable {
@@ -748,7 +642,7 @@ pub fn validate_arglist(fname: &String, arglist: &ArgList) -> Result<bool, ()> {
         Ok(false)
     }
 }
-
+//Gets the label of a function
 pub fn get_function_label(fname: &String) -> usize {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(entry) = gst.get(fname) {
@@ -762,5 +656,43 @@ pub fn get_function_label(fname: &String) -> usize {
         };
     } else {
         LABEL_NOT_FOUND
+    }
+}
+/*
+ * Validates if a variable is in scope
+ */
+pub fn validate_locality(vname: String) {
+    let lst = LOCALSYMBOLTABLE.lock().unwrap();
+    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    if let Some(entry) = gst.get(&vname) {
+        match entry {
+            GSymbol::Func {
+                ret_type: _,
+                paramlist: _,
+                flabel: _,
+            } => {
+                //exit if a function with similar name exists
+                exit_on_err(
+                    "Parameter Symbol ".to_owned()
+                        + vname.as_str()
+                        + " is already declared as a function",
+                );
+            }
+            GSymbol::Var {
+                vartype: _,
+                varid: _,
+                varindices: _,
+            } => {
+                //Shadow global variable after warning user
+                log::warn!(
+                    "Parameter Symbol {} is already declared as a variable in global scope",
+                    vname
+                );
+            }
+            GSymbol::Null => exit_on_err("GST error".to_owned()),
+        }
+    }
+    if lst.contains_key(&vname) == true {
+        exit_on_err("Parameter Symbol ".to_owned() + vname.as_str() + " is already declared ");
     }
 }

@@ -1,36 +1,34 @@
 decl
-	int foo(int b, int c, int d);
+	str foo(int b, int c, int d);
 	int b;
 	int c;
 	int d;
+	int bar();
 enddecl
 
-int foo(int b, int c, int d) {
+int bar() {
+	decl
+	enddecl
+	begin
+		return 0;
+	end
+}
+str foo(int b, int c, int d) {
 	decl
 		int max;
 	enddecl
 	begin
-		if (b > c) then
-			if (b > d) then
-				max = b;
-			else
-				max = d;
-			endif;
-		else
-			if (c > d) then
-				max = c;
-			else
-				max = d;
-			endif;
-		endif;
+		write(b);
+		write(c);
+		write(d);
 
-		write(max);
 		return 0;
 	end
 }
 int main(){
 	decl
 		int a,max,x;
+		str q;
 	enddecl
 	begin
 		read(a);
@@ -67,7 +65,8 @@ int main(){
 				endif;
 			endif;
 		endif;
-		x= foo(b,c,d);
+		q= foo(b,c,d);
 		write(max);
+		a = bar();
 	end
 }

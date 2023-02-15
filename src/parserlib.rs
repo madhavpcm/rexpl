@@ -6,7 +6,8 @@ use std::sync::Mutex;
 
 use crate::codegen::exit_on_err;
 use crate::codegen::FUNCTION_STACK;
-use crate::codegen::SCOPE_STACK;
+use crate::codegen::LABEL_COUNT;
+use crate::validation::validate_locality;
 
 lazy_static! {
     pub static ref FUNCTION_TABLE: Mutex<HashMap<String, HashMap<String, LSymbol>>> =
@@ -14,12 +15,14 @@ lazy_static! {
     pub static ref GLOBALSYMBOLTABLE: Mutex<HashMap<String, GSymbol>> =
         Mutex::new(HashMap::default());
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
+    pub static ref LOCALSYMBOLTABLE: Mutex<HashMap<String, LSymbol>> =
+        Mutex::new(HashMap::default());
 }
 #[derive(Debug, Clone)]
 pub enum GSymbol {
     Func {
         ret_type: ASTExprType,
-        paramlist: Box<ParamList>,
+        paramlist: LinkedList<Param>,
         flabel: usize,
     },
     Var {
@@ -89,24 +92,39 @@ pub enum ASTExprType {
     Null,
 }
 
+impl ASTExprType {
+    fn refrtype(&self) -> Result<Self, &'static str> {
+        match self {
+            ASTExprType::String => Ok(ASTExprType::StringRef),
+            ASTExprType::Int => Ok(ASTExprType::IntRef),
+            _ => Err("Cannot refr to this type"),
+        }
+    }
+    fn derefrtype(&self) -> Result<Self, &'static str> {
+        match self {
+            ASTExprType::StringRef => Ok(ASTExprType::String),
+            ASTExprType::IntRef => Ok(ASTExprType::Int),
+            _ => Err("Cannot derefr to this type"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ASTError {
     TypeError(String),
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum ParamList {
-    Node {
-        var: String,
-        vartype: ASTExprType,
-        indices: Vec<usize>,
-        next: Box<ParamList>,
-    },
-    Null,
+pub struct Param {
+    pub var: String,
+    pub vartype: ASTExprType,
+    pub indices: Vec<usize>,
 }
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub enum ArgList {
-    Node { expr: ASTNode, next: Box<ArgList> },
-    Null,
+impl From<Param> for LinkedList<Param> {
+    fn from(param: Param) -> Self {
+        let mut list = LinkedList::new();
+        list.push_back(param);
+        list
+    }
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum VarList {
@@ -157,18 +175,18 @@ pub enum ASTNode {
     FuncDeclNode {
         fname: String,
         ret_type: ASTExprType,
-        paramlist: Box<ParamList>,
+        paramlist: Box<LinkedList<Param>>,
     },
     FuncDefNode {
         fname: String,
         ret_type: ASTExprType,
-        paramlist: Box<ParamList>,
+        paramlist: Box<LinkedList<Param>>,
         decl: Box<LinkedList<ASTNode>>,
         body: Box<ASTNode>,
     },
     FuncCallNode {
         fname: String,
-        arglist: Box<ArgList>,
+        arglist: Box<LinkedList<ASTNode>>,
     },
     ErrorNode {
         err: ASTError,
@@ -183,6 +201,14 @@ pub enum ASTNode {
     BreakNode,
     ContinueNode,
     Null,
+}
+impl From<ASTNode> for LinkedList<ASTNode> {
+    fn from(node: ASTNode) -> Self {
+        let mut linkedlist = LinkedList::new();
+        linkedlist.push_back(node);
+        linkedlist
+        // convert the parserlib::ASTNode to your ASTNode type and return a LinkedList
+    }
 }
 /*
  * Convert string to integer
@@ -247,144 +273,71 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
     };
     return vartype;
 }
-/*64
- * Function to check if a condition expression returns boolean
+/*
+ * Function to insert parameter list to local symbol table
  */
-pub fn __gen_local_symbol_table(decllist: &LinkedList<ASTNode>, paramlist: &ParamList) {
-    let mut ss = SCOPE_STACK.lock().unwrap();
-    let local_table = ss.last_mut().unwrap();
-
-    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-
-    let mut local_var_id: i64 = 1;
-    let mut param_offset: i64 = -3;
-
-    let mut paramptr = paramlist;
+pub fn __lst_install_params(paramlist: &LinkedList<Param>) {
+    //Check if this variable is in Global Symbol Table
+    let mut localid = -3;
+    for param in paramlist {
+        validate_locality(param.var.clone());
+        let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+        lst.insert(
+            param.var.clone(),
+            LSymbol::Var {
+                vartype: (param.vartype),
+                varid: (localid),
+                varindices: (param.indices.clone()),
+            },
+        );
+        let mut siz = 1;
+        for i in &param.indices {
+            siz *= i;
+        }
+        localid -= i64::try_from(siz).unwrap();
+    }
+}
+/*
+ * Function to insert declared variabled to local symbol table
+ */
+pub fn __lst_install_variables(vtype: &ASTExprType, l: &VarList) {
+    //Check if this variable is in Global Symbol Table
+    let mut ptr = l;
+    let mut localid = 1;
     loop {
-        match paramptr {
-            ParamList::Node {
+        match ptr {
+            VarList::Node {
                 var,
-                vartype,
+                refr,
                 indices,
                 next,
             } => {
-                if gst.contains_key(var) == true {
-                    if let Some(entry) = gst.get(var) {
-                        match entry {
-                            GSymbol::Func {
-                                ret_type: _,
-                                paramlist: _,
-                                flabel: _,
-                            } => {
-                                exit_on_err(
-                                    "Argument name with ".to_owned()
-                                        + var.as_str()
-                                        + " is already declared as a function",
-                                );
-                            }
-                            GSymbol::Var {
-                                vartype: _,
-                                varid: _,
-                                varindices: _,
-                            } => {
-                                log::warn!(
-                                    "Argument {} is already declared as a variable in global scope",
-                                    var
-                                );
-                            }
-                            GSymbol::Null => exit_on_err("GST error".to_owned()),
-                        }
-                    }
-                    local_table.insert(
-                        var.clone(),
-                        LSymbol::Var {
-                            vartype: vartype.clone(),
-                            varid: param_offset.clone(),
-                            varindices: indices.clone(),
-                        },
-                    );
-                    let mut size = 1;
-                    for i in indices {
-                        size = size * i;
-                    }
-                    param_offset = param_offset - i64::try_from(size).unwrap();
-                    paramptr = next;
+                validate_locality(var.clone());
+                let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+                let itype;
+                if refr == &true {
+                    itype = vtype.refrtype().unwrap();
+                } else {
+                    itype = vtype.clone();
                 }
+                lst.insert(
+                    var.clone(),
+                    LSymbol::Var {
+                        vartype: (itype),
+                        varid: (localid),
+                        varindices: (indices.clone()),
+                    },
+                );
+                let mut siz = 1;
+                for i in indices {
+                    siz *= i;
+                }
+                localid += i64::try_from(siz).unwrap();
+                ptr = &**next;
             }
-            ParamList::Null => {
+            VarList::Null => {
                 break;
             }
-        };
-    }
-
-    for i in decllist.iter() {
-        match i {
-            ASTNode::DeclNode { var_type, list } => {
-                let mut ptr = *list.clone();
-
-                loop {
-                    match ptr {
-                        VarList::Node {
-                            var,
-                            refr,
-                            indices,
-                            next,
-                        } => {
-                            if gst.contains_key(&var) == true {
-                                if let Some(entry) = gst.get(&var) {
-                                    match entry {
-                                        GSymbol::Func {
-                                            ret_type: _,
-                                            paramlist: _,
-                                            flabel: _,
-                                        } => {
-                                            exit_on_err(
-                                                "Variable ".to_owned()
-                                                    + var.as_str()
-                                                    + " is already declared as a function",
-                                            );
-                                        }
-                                        GSymbol::Var {
-                                            vartype: _,
-                                            varid: _,
-                                            varindices: _,
-                                        } => {
-                                            log::warn!("Variable {} is already declared as a variable in global scope", var);
-                                        }
-                                        GSymbol::Null => exit_on_err("GST error".to_owned()),
-                                    }
-                                }
-                            }
-                            let mut vart = var_type.clone();
-                            if refr == true {
-                                if vart == ASTExprType::String {
-                                    vart = ASTExprType::StringRef;
-                                } else {
-                                    vart = ASTExprType::IntRef;
-                                }
-                            }
-                            local_table.insert(
-                                var,
-                                LSymbol::Var {
-                                    vartype: vart.clone(),
-                                    varid: local_var_id,
-                                    varindices: indices.clone(),
-                                },
-                            );
-                            let mut size = 1;
-                            for i in indices {
-                                size = size * i;
-                            }
-                            local_var_id = local_var_id + i64::try_from(size).unwrap();
-                            ptr = *next;
-                        }
-                        VarList::Null => {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => exit_on_err("Invalid declaration in function ".to_owned()),
         }
     }
 }
@@ -403,12 +356,15 @@ pub fn __gen_global_symbol_table(declnode: &ASTNode) {
             paramlist: plist,
         } => {
             let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            let mut label_count = LABEL_COUNT.lock().unwrap();
+            let l = label_count.clone();
+            *label_count += 1;
 
             gst.insert(fname.to_string(), {
                 GSymbol::Func {
                     ret_type: ret.clone(),
-                    paramlist: plist.clone(),
-                    flabel: 0,
+                    paramlist: *plist.clone(),
+                    flabel: l,
                 }
             });
         }

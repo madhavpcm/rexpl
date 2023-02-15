@@ -137,7 +137,6 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
                 writeln!(f, "{}", line.replace(k.as_str(), v.to_string().as_str()))
                     .expect("[linker] xsm file write error");
                 flag = true;
-                log::warn!("{}", line.replace(k.as_str(), v.to_string().as_str()));
                 break;
             }
         }
@@ -146,9 +145,6 @@ pub fn linker(filename: &str) -> Result<bool, ()> {
         }
     }
 
-    for (k, v) in label_map.iter() {
-        log::info!(" Label {} -> {}", k, v);
-    }
     log::trace!("Generated XSM Assembly: {}.xsm", filename);
 
     Ok(false)
