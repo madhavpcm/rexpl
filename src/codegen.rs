@@ -107,7 +107,7 @@ fn __get_safe_register() -> usize {
 //function to restore register context
 fn __restore_register(mut file: &File, safe_register: usize) {
     let mut rs = REGISTER_STACK.lock().unwrap();
-    let registers = rs.last().unwrap().clone();
+    let mut registers = rs.last().unwrap().clone();
     for i in (0..MAX_REGISTERS).rev() {
         if registers[i].0 == true && i != safe_register {
             if let Err(e) = writeln!(file, "POP R{}", i) {
@@ -116,6 +116,10 @@ fn __restore_register(mut file: &File, safe_register: usize) {
         }
     }
     rs.pop();
+    registers[safe_register].0 = true;
+    let mut reg = REGISTERS.lock().unwrap();
+    *reg = registers.clone();
+    std::mem::drop(registers);
     //reset to not used
 }
 fn __load_variable(mut file: &File, vname: &String, refr: bool) -> usize {
@@ -712,24 +716,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         }
         ASTNode::MainNode { decl, body } => {
             //this node is traverse after all function def nodes,
-            let mut label_count = LABEL_COUNT.lock().unwrap();
-            let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            let l = label_count.clone();
-            *label_count += 1;
-            //in case main() is recursively called, we need the label of main
-            gst.insert(
-                "main".to_string(),
-                GSymbol::Func {
-                    ret_type: (ASTExprType::Int),
-                    paramlist: LinkedList::new(),
-                    flabel: (l),
-                },
-            );
-            if let Err(e) = writeln!(file, "L{}:", l) {
+            if let Err(e) = writeln!(file, "L{}:", get_function_label(&"main".to_owned())) {
                 exit_on_err(e.to_string());
             }
-            std::mem::drop(label_count);
-            std::mem::drop(gst);
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(local_table) = ft.get("main") {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -766,10 +755,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             25
         }
         ASTNode::FuncDeclNode {
-            fname,
-            ret_type,
-            paramlist,
-        } => 0,
+            fname: _,
+            ret_type: _,
+            paramlist: _,
+        } => 25,
         /*
          * L{funclabel}:
          *    Subtract SP by declvars.size()
@@ -778,8 +767,8 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
          */
         ASTNode::FuncDefNode {
             fname,
-            ret_type,
-            paramlist,
+            ret_type: _,
+            paramlist: _,
             decl,
             body,
         } => {
@@ -801,7 +790,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 exit_on_err(e.to_string());
             }
             let ft = FUNCTION_TABLE.lock().unwrap();
-            if let Some(local_table) = ft.get(fname) {
+            if let Some(_local_table) = ft.get(fname) {
                 let mut fs = FSTACK.lock().unwrap();
                 fs.push((fname.clone(), get_ldecl_storage(decl)));
                 std::mem::drop(ft);
@@ -937,7 +926,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 exit_on_err(e.to_string());
             }
             //increment label_count
-            0
+            25
         }
         /*
          * L1:
@@ -962,9 +951,8 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         ASTNode::DeclNode {
             var_type: _,
             list: _,
-        } => 0,
-        ASTNode::Null => 0,
-        _ => 0,
+        } => 25,
+        ASTNode::Null => 25,
     }
 }
 
@@ -972,14 +960,26 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
  * Meta function to generate header compatible to XSM ABI Standard
  */
 fn __header_gen(mut file: &File) {
-    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
     log::info!("Global Symbol Table Size : {}", gst.len());
+    let mut label_count = LABEL_COUNT.lock().unwrap();
+    let l = label_count.clone();
+    *label_count += 1;
+    //in case main() is recursively called, we need the label of main
+    gst.insert(
+        "main".to_string(),
+        GSymbol::Func {
+            ret_type: (ASTExprType::Int),
+            paramlist: LinkedList::new(),
+            flabel: (l),
+        },
+    );
     let mut baseaddr = 0;
     for (_k, v) in gst.iter() {
         match v {
             GSymbol::Var {
-                vartype,
-                varid,
+                vartype: _,
+                varid: _,
                 varindices,
             } => {
                 let mut size = 1;
@@ -993,7 +993,7 @@ fn __header_gen(mut file: &File) {
     }
     writeln!(
         file,
-        "0\n2056\n0\n0\n0\n0\n0\n0\nBRKP\nMOV SP, 4095\nADD SP, {baseaddr}",
+        "0\n2056\n0\n0\n0\n0\n0\n0\nBRKP\nMOV SP, 4095\nADD SP, {baseaddr}\nMOV BP,SP\nADD SP,1\nCALL L{l}\nSUB SP,1\nPUSH R0\nINT 10",
     )
     .unwrap();
 }
@@ -1001,7 +1001,7 @@ fn __header_gen(mut file: &File) {
 /*
  * Meta function to generate xsm code for Write Syscall of expos
  */
-fn __xsm_write_syscall(mut file: &File, var: usize) -> usize {
+fn __xsm_write_syscall(file: &File, var: usize) -> usize {
     __backup_registers(file);
     let register = get_reg();
     write_line(file, format_args!("MOV R{}, \"Write\"", register));
@@ -1055,6 +1055,23 @@ pub fn code_gen(root: &ASTNode, filename: String) -> usize {
             let result: usize = __code_gen(root, &file, false);
             if let Err(e) = writeln!(file, "PUSH R{}", result) {
                 exit_on_err(e.to_string());
+            }
+            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+            for (k, v) in gst.iter() {
+                match v {
+                    GSymbol::Func {
+                        ret_type,
+                        paramlist,
+                        flabel,
+                    } => {
+                        log::info!("Function {} :: {}", k, flabel);
+                    }
+                    GSymbol::Var {
+                        vartype,
+                        varid,
+                        varindices,
+                    } => continue,
+                }
             }
             __xsm_exit_syscall(&file);
             log::trace!("Generated Object file: {}", filename.as_str());

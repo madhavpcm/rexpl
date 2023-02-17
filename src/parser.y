@@ -19,6 +19,7 @@
 %token "ENDWHILE"
 %token "VAR"
 %token "BREAK"
+%token "BREAKPOINT"
 %token "CONTINUE"
 %token "MAIN"
 %token "DECL"
@@ -65,7 +66,7 @@ Start -> Result<ASTNode, ()>:
     }
 	;
 MainBlock -> Result<ASTNode,()>:
-	"INT_T" "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
+	FType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let mut fs = FUNCTION_STACK.lock().unwrap();
 		fs.push("main".to_string());
@@ -352,11 +353,19 @@ FDefBlock -> Result<ASTNode,()>:
 FType -> Result<ASTExprType,()>:
 	PtrType
 	{
-		$1
+		let mut ct = CURR_TYPE.lock().unwrap();
+		let vtype = $1?;
+		*ct = vtype.clone();
+		std::mem::drop(ct);
+		Ok(vtype)
 	}
 	| Type
 	{
-		$1
+		let mut ct = CURR_TYPE.lock().unwrap();
+		let vtype = $1?;
+		*ct = vtype.clone();
+		std::mem::drop(ct);
+		Ok(vtype)
 	}
 	;
 FDef ->Result<ASTNode,()>:
@@ -430,11 +439,8 @@ ParamList -> Result<LinkedList<Param>,()>:
 Param -> Result<LinkedList<Param>,()>:
 	FType VariableDef 
     {
-		let mut ct = CURR_TYPE.lock().unwrap();
 		let var = $2?;
         let vtype = $1?;
-		*ct = vtype.clone();
-		std::mem::drop(ct);
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
 				if indices != Vec::default() {
@@ -548,7 +554,7 @@ Stmt -> Result<ASTNode,()>:
 	{
 		$1
 	}
-	| "BREAKPOINT"
+	| "BREAKPOINT" ';'
 	{
 		Ok(ASTNode::BreakpointNode)
 	}
