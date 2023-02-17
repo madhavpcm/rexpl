@@ -4,8 +4,6 @@ use std::collections::LinkedList;
 use std::fmt::{Debug, Formatter};
 use std::sync::Mutex;
 
-use crate::codegen::exit_on_err;
-use crate::codegen::FUNCTION_STACK;
 use crate::codegen::LABEL_COUNT;
 use crate::validation::validate_locality;
 
@@ -14,9 +12,11 @@ lazy_static! {
         Mutex::new(HashMap::default());
     pub static ref GLOBALSYMBOLTABLE: Mutex<HashMap<String, GSymbol>> =
         Mutex::new(HashMap::default());
+    pub static ref LOCALVARID: Mutex<i64> = Mutex::new(1);
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
     pub static ref LOCALSYMBOLTABLE: Mutex<HashMap<String, LSymbol>> =
         Mutex::new(HashMap::default());
+    pub static ref CURR_TYPE: Mutex<ASTExprType> = Mutex::new(ASTExprType::Null);
 }
 #[derive(Debug, Clone)]
 pub enum GSymbol {
@@ -30,7 +30,6 @@ pub enum GSymbol {
         varid: usize,
         varindices: Vec<usize>,
     },
-    Null,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LSymbol {
@@ -39,7 +38,6 @@ pub enum LSymbol {
         varid: i64,
         varindices: Vec<usize>,
     },
-    Null,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ASTNodeType {
@@ -199,6 +197,7 @@ pub enum ASTNode {
         body: Box<ASTNode>,
     },
     BreakNode,
+    BreakpointNode,
     ContinueNode,
     Null,
 }
@@ -254,7 +253,6 @@ pub fn __get_gsymbol_type(g: &GSymbol) -> &ASTExprType {
             varid: _,
             varindices: _,
         } => vartype,
-        GSymbol::Null => &ASTExprType::Null,
     };
     return vartype;
 }
@@ -269,7 +267,6 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
             varid: _,
             varindices: _,
         } => vartype,
-        LSymbol::Null => &ASTExprType::Null,
     };
     return vartype;
 }
@@ -303,7 +300,7 @@ pub fn __lst_install_params(paramlist: &LinkedList<Param>) {
 pub fn __lst_install_variables(vtype: &ASTExprType, l: &VarList) {
     //Check if this variable is in Global Symbol Table
     let mut ptr = l;
-    let mut localid = 1;
+    let mut localid = LOCALVARID.lock().unwrap();
     loop {
         match ptr {
             VarList::Node {
@@ -324,7 +321,7 @@ pub fn __lst_install_variables(vtype: &ASTExprType, l: &VarList) {
                     var.clone(),
                     LSymbol::Var {
                         vartype: (itype),
-                        varid: (localid),
+                        varid: (*localid),
                         varindices: (indices.clone()),
                     },
                 );
@@ -332,7 +329,7 @@ pub fn __lst_install_variables(vtype: &ASTExprType, l: &VarList) {
                 for i in indices {
                     siz *= i;
                 }
-                localid += i64::try_from(siz).unwrap();
+                *localid += i64::try_from(siz).unwrap();
                 ptr = &**next;
             }
             VarList::Null => {

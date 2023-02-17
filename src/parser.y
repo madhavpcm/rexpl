@@ -380,11 +380,14 @@ FDef ->Result<ASTNode,()>:
 		}
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
+		let mut lv = LOCALVARID.lock().unwrap();
+		*lv = 1;
 		ft.insert(
 			funcname,
 			lst.clone()
 		);
 		lst.clear();
+		std::mem::drop(lv);
 		std::mem::drop(lst);
 		std::mem::drop(ft);
 		Ok(node)
@@ -427,8 +430,11 @@ ParamList -> Result<LinkedList<Param>,()>:
 Param -> Result<LinkedList<Param>,()>:
 	FType VariableDef 
     {
+		let mut ct = CURR_TYPE.lock().unwrap();
 		let var = $2?;
         let vtype = $1?;
+		*ct = vtype.clone();
+		std::mem::drop(ct);
 		match var {
 			VarList::Node { var,refr:_,indices,next}=> {
 				if indices != Vec::default() {
@@ -541,6 +547,10 @@ Stmt -> Result<ASTNode,()>:
     | IfStmt
 	{
 		$1
+	}
+	| "BREAKPOINT"
+	{
+		Ok(ASTNode::BreakpointNode)
 	}
 	| "BREAK" ';'
 	{

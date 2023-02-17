@@ -201,7 +201,7 @@ pub fn getexprtype(node: &ASTNode) -> Option<ASTExprType> {
             }
             _ => None,
         },
-        ASTNode::FuncCallNode { fname, arglist } => {
+        ASTNode::FuncCallNode { fname, arglist: _ } => {
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
             if let Some(entry) = gst.get(fname) {
                 match entry {
@@ -222,8 +222,8 @@ pub fn getexprtype(node: &ASTNode) -> Option<ASTExprType> {
 pub fn getvarindices(name: &String) -> Option<Vec<usize>> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
-        vartype,
-        varid,
+        vartype: _,
+        varid: _,
         varindices,
     }) = lst.get(name)
     {
@@ -231,8 +231,8 @@ pub fn getvarindices(name: &String) -> Option<Vec<usize>> {
     }
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
-        vartype,
-        varid,
+        vartype: _,
+        varid: _,
         varindices,
     }) = gst.get(name)
     {
@@ -278,18 +278,18 @@ pub fn get_ldecl_storage(decllist: &Box<LinkedList<ASTNode>>) -> usize {
 pub fn getvarid(name: &String) -> Option<i64> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
-        vartype,
+        vartype: _,
         varid,
-        varindices,
+        varindices: _,
     }) = lst.get(name)
     {
         return Some(*varid);
     }
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
-        vartype,
+        vartype: _,
         varid,
-        varindices,
+        varindices: _,
     }) = gst.get(name)
     {
         return Some(i64::try_from(*varid).unwrap());
@@ -300,8 +300,8 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
         vartype,
-        varid,
-        varindices,
+        varid: _,
+        varindices: _,
     }) = lst.get(name)
     {
         return Some(*vartype);
@@ -309,8 +309,8 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
         vartype,
-        varid,
-        varindices,
+        varid: _,
+        varindices: _,
     }) = gst.get(name)
     {
         return Some(*vartype);
@@ -325,7 +325,6 @@ pub fn varinscope(name: &String) -> Result<bool, ()> {
         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
         if let Some(entry) = gst.get(name) {
             match entry {
-                GSymbol::Null => Ok(false),
                 GSymbol::Var {
                     vartype: _,
                     varid: _,
@@ -386,9 +385,18 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
             xelse: _,
         } => {
             if getexprtype(&expr) != Some(ASTExprType::Bool) {
-                exit_on_err("Invalid Expression inside if".to_owned());
+                exit_on_err("Invalid Expression inside ifelse".to_owned());
             }
             Ok(true)
+        }
+        ASTNode::ReturnNode { expr } => {
+            let ct = CURR_TYPE.lock().unwrap();
+
+            if getexprtype(expr).unwrap() != *ct {
+                Ok(false)
+            } else {
+                Ok(true)
+            }
         }
         ASTNode::UnaryNode { op, ptr } => match op {
             ASTNodeType::Ref => {
@@ -545,7 +553,7 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
             if let Some(entry) = gst.get(fname) {
                 match entry {
                     GSymbol::Func {
-                        ret_type,
+                        ret_type: _,
                         paramlist,
                         flabel: _,
                     } => {
@@ -689,7 +697,6 @@ pub fn validate_locality(vname: String) {
                     vname
                 );
             }
-            GSymbol::Null => exit_on_err("GST error".to_owned()),
         }
     }
     if lst.contains_key(&vname) == true {

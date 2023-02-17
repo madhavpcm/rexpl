@@ -6,8 +6,10 @@ use lazy_static::lazy_static; // 1.4.0
 use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::LinkedList;
+use std::fmt::format;
 use std::fs::{File, OpenOptions};
 use std::io::{Error, Write};
+use std::process::exit;
 use std::sync::Mutex;
 
 //global mutable arrays must be guarded with a mutex :(
@@ -66,7 +68,7 @@ pub fn free_reg(register: usize) -> u64 {
     return MAX_REGISTERS.try_into().unwrap();
 }
 //function to push arguments
-fn __push_args(mut file: &File, arglist: &LinkedList<ASTNode>, refr: bool) {
+fn __push_args(file: &File, arglist: &LinkedList<ASTNode>, refr: bool) {
     for arg in arglist {
         let argreg = __code_gen(&arg, file, refr);
         write_line(file, format_args!("PUSH R{}", argreg));
@@ -99,6 +101,7 @@ fn __get_safe_register() -> usize {
             return i;
         }
     }
+    exit_on_err("Out of registers".to_string());
     0
 }
 //function to restore register context
@@ -171,7 +174,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTError::TypeError(s) => s.to_owned(),
             };
             exit_on_err(err);
-            0
+            25
+        }
+        ASTNode::BreakpointNode => {
+            write_line(file, format_args!("BRKP"));
+            25
         }
         ASTNode::STR(s) => {
             let register = get_reg();
@@ -570,12 +577,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     }
                     free_reg(left_register);
                     free_reg(right_register);
-                    0
+                    25
                 }
                 ASTNodeType::Connector => {
-                    __code_gen(lhs, file, false);
-                    __code_gen(rhs, file, false);
-                    0
+                    let res = __code_gen(lhs, file, false);
+                    free_reg(res);
+                    let res = __code_gen(rhs, file, false);
+                    free_reg(res);
+                    25
                 }
                 _ => 0,
             };
@@ -583,16 +592,40 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         }
         ASTNode::UnaryNode { op, ptr } => match op {
             ASTNodeType::Read => {
-                let register: usize = __code_gen(ptr, file, true).try_into().unwrap();
-                __xsm_read_syscall(file, usize::try_from(register).unwrap());
+                __backup_registers(file);
+                let register = get_reg();
+                write_line(file, format_args!("MOV R{}, \"Read\"", register));
+                write_line(file, format_args!("PUSH R{}", register));
+                write_line(file, format_args!("MOV R{}, -1", register));
+                write_line(file, format_args!("PUSH R{}", register));
                 free_reg(register);
-                0
+                let register: usize = __code_gen(ptr, file, true).try_into().unwrap();
+                write_line(file, format_args!("PUSH R{}", register));
+                write_line(file, format_args!("ADD SP, 2"));
+                write_line(file, format_args!("CALL 0"));
+                let ret_reg = __get_safe_register();
+                write_line(file, format_args!("POP R{}", ret_reg));
+                write_line(file, format_args!("SUB SP, 4"));
+                __restore_register(file, ret_reg);
+                ret_reg
             }
             ASTNodeType::Write => {
+                __backup_registers(file);
+                let register = get_reg();
+                write_line(file, format_args!("MOV R{}, \"Write\"", register));
+                write_line(file, format_args!("PUSH R{}", register));
+                write_line(file, format_args!("MOV R{}, -2", register));
+                write_line(file, format_args!("PUSH R{}", register));
+                free_reg(register);
                 let variable: usize = __code_gen(ptr, file, false).try_into().unwrap();
-                __xsm_write_syscall(file, variable);
-                free_reg(variable);
-                0
+                write_line(file, format_args!("PUSH R{}", variable));
+                write_line(file, format_args!("ADD SP, 2"));
+                write_line(file, format_args!("CALL 0"));
+                let ret_reg = __get_safe_register();
+                write_line(file, format_args!("POP R{}", ret_reg));
+                write_line(file, format_args!("SUB SP, 4"));
+                __restore_register(file, ret_reg);
+                ret_reg
             }
             ASTNodeType::Ref => {
                 match &**ptr {
@@ -628,7 +661,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             _ => 0,
         },
         ASTNode::FuncCallNode { fname, arglist } => {
-            let mut ptr = &**arglist;
             //Save Live registers except ret_reg
             __backup_registers(file);
             //Push Arguments
@@ -676,7 +708,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let mut registers = REGISTERS.lock().unwrap();
             *registers = vec![(false, 0); MAX_REGISTERS];
             std::mem::drop(registers);
-            0
+            25
         }
         ASTNode::MainNode { decl, body } => {
             //this node is traverse after all function def nodes,
@@ -731,7 +763,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             } else {
                 exit_on_err("main not defined".to_string())
             }
-            0
+            25
         }
         ASTNode::FuncDeclNode {
             fname,
@@ -780,7 +812,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let mut fs = FSTACK.lock().unwrap();
             fs.pop();
             std::mem::drop(fs);
-            0
+            25
         }
         /*
          * <expr>
@@ -823,7 +855,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             if let Err(e) = writeln!(file, "L{}:", l2) {
                 exit_on_err(e.to_string());
             }
-            0
+            25
         }
         /* While Node
          * L1:
@@ -876,7 +908,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 exit_on_err(e.to_string());
             }
             //increment label_count
-            0
+            25
         }
         /* If Node
          * <expr>
@@ -919,13 +951,13 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let while_tracker = WHILE_TRACKER.lock().unwrap();
             writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 1])
                 .expect("[code_gen] Write error");
-            0
+            25
         }
         ASTNode::ContinueNode => {
             let while_tracker = WHILE_TRACKER.lock().unwrap();
             writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 2])
                 .expect("[code_gen] Write error");
-            0
+            25
         }
         ASTNode::DeclNode {
             var_type: _,
@@ -969,23 +1001,27 @@ fn __header_gen(mut file: &File) {
 /*
  * Meta function to generate xsm code for Write Syscall of expos
  */
-fn __xsm_write_syscall(mut file: &File, var: usize) {
+fn __xsm_write_syscall(mut file: &File, var: usize) -> usize {
+    __backup_registers(file);
     let register = get_reg();
-    if let Err(e) = writeln!(file, "MOV R{},\"Write\"\nPUSH R{}\nMOV R{},-2\nPUSH R{}\nMOV R{},R{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,register,var,register,register,register,register,register) {
-        exit_on_err(e.to_string());
-    }
-    free_reg(register);
+    write_line(file, format_args!("MOV R{}, \"Write\"", register));
+    write_line(file, format_args!("PUSH R{}", register));
+    write_line(file, format_args!("MOV R{}, -2", register));
+    write_line(file, format_args!("PUSH R{}", register));
+    write_line(file, format_args!("PUSH R{}", var));
+    write_line(file, format_args!("ADD SP,2"));
+    write_line(file, format_args!("CALL 0"));
+    write_line(file, format_args!("POP R{}", register));
+    write_line(file, format_args!("SUB SP,4"));
+    __restore_register(file, register);
+    register
 }
 
 /*
  * Meta function to generate xsm code for Read Syscall of expos
  */
-fn __xsm_read_syscall(mut file: &File, var: usize) {
-    let register = get_reg();
-    if let Err(e) = writeln!(file, "MOV R{},\"Read\"\nPUSH R{}\nMOV R{},-1\nPUSH R{}\nPUSH R{}\nPUSH R0\nPUSH R0\nCALL 0\nPOP R0\nPOP R{}\nPOP R{}\nPOP R{}\nPOP R{}",register,register,register,register,var,register,register,register,register) {
-        exit_on_err(e.to_string());
-    }
-    free_reg(register);
+fn __xsm_read_syscall(mut file: &File, var: usize) -> usize {
+    0
 }
 
 /*
