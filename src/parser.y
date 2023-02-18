@@ -68,9 +68,6 @@ Start -> Result<ASTNode, ()>:
 MainBlock -> Result<ASTNode,()>:
 	FType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
-		let mut fs = FUNCTION_STACK.lock().unwrap();
-		fs.push("main".to_string());
-		std::mem::drop(fs);
 		let ldecl_ = $6.map_err(|_| ())?;
 		let body_ = $7.map_err(|_| ())?;
 		let node = ASTNode::MainNode{
@@ -1026,7 +1023,6 @@ VariableExpr -> Result<ASTNode,()>:
 // Any functions here are in scope for all the grammar actions above.
 use crate::parserlib::{*};
 use crate::validation::{*};
-use crate::codegen::FUNCTION_STACK;
 use crate::codegen::exit_on_err;
 use crate::codegen::LABEL_COUNT;
 use std::collections::HashMap;

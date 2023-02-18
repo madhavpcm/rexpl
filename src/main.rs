@@ -63,7 +63,8 @@ fn main() {
 
     let (expr_res, errs) = parser_y::parse(&lexer_);
     for e in errs {
-        println!("{}", e.pp(&lexer_, &parser_y::token_epp));
+        log::error!("{}", e.pp(&lexer_, &parser_y::token_epp));
+        process::exit(1);
     }
     if let Some(Ok(r)) = expr_res {
         codegen::code_gen(&r, filename.to_owned() + ".o");

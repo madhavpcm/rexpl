@@ -13,24 +13,26 @@ use std::process::exit;
 use std::sync::Mutex;
 
 //global mutable arrays must be guarded with a mutex :(
-//TODO maybe initalize this array somewhere and then pass the array as reference to each code_gen
 //TODO Assignment statement can be optimized
 //recursive call
 const MAX_REGISTERS: usize = 21;
 pub const XSM_STACK_OFFSET: i64 = 4096;
 pub const LABEL_NOT_FOUND: usize = 10000;
 
+//Global variables used
 lazy_static! {
     pub static ref REGISTERS: Mutex<Vec<(bool, i64)>> = Mutex::new(vec![(false, 0); MAX_REGISTERS]);
-    pub static ref VARIABLE_REGISTER_MAP: Mutex<HashMap<usize, usize>> =
-        Mutex::new(HashMap::default());
+    //Label assigner
     pub static ref LABEL_COUNT: Mutex<usize> = Mutex::new(0);
+    //for continue and break statements
     pub static ref WHILE_TRACKER: Mutex<Vec<usize>> = Mutex::new(Vec::default());
-    pub static ref FUNCTION_STACK: Mutex<Vec<String>> = Mutex::new(Vec::default());
+    //Need a stack to call F(F(F(5))) type calls
     pub static ref REGISTER_STACK: Mutex<Vec<Vec<(bool, i64)>>> = Mutex::new(Vec::default());
+    //TODO remove this stack
     pub static ref FSTACK: Mutex<Vec<(String, usize)>> = Mutex::new(Vec::default());
 }
 
+//Wrap error and write to file
 fn write_line(mut writer: &File, args: std::fmt::Arguments) {
     if let Err(e) = writeln!(writer, "{}", args) {
         exit_on_err(e.to_string());
@@ -83,9 +85,7 @@ fn __backup_registers(mut file: &File) {
     for i in 0..MAX_REGISTERS {
         if registers[i].0 == true {
             log::info!("R{} is being saved", i);
-            if let Err(e) = writeln!(file, "PUSH R{}", i) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("PUSH R{}", i));
         }
         registers[i].0 = false;
     }
@@ -110,9 +110,7 @@ fn __restore_register(mut file: &File, safe_register: usize) {
     let mut registers = rs.last().unwrap().clone();
     for i in (0..MAX_REGISTERS).rev() {
         if registers[i].0 == true && i != safe_register {
-            if let Err(e) = writeln!(file, "POP R{}", i) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("POP R{}", i));
         }
     }
     rs.pop();
@@ -122,7 +120,7 @@ fn __restore_register(mut file: &File, safe_register: usize) {
     std::mem::drop(registers);
     //reset to not used
 }
-fn __load_variable(mut file: &File, vname: &String, refr: bool) -> usize {
+fn __load_variable(mut file: &File, vname: &String) -> usize {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
         vartype: _,
@@ -131,17 +129,11 @@ fn __load_variable(mut file: &File, vname: &String, refr: bool) -> usize {
     }) = lst.get(vname)
     {
         let vreg = get_reg();
-        if let Err(e) = writeln!(file, "MOV R{}, BP", vreg) {
-            exit_on_err(e.to_string())
-        }
+        write_line(file, format_args!("MOV R{}, BP", vreg));
         if *varid < 0 {
-            if let Err(e) = writeln!(file, "SUB R{}, {}", vreg, -1 * varid) {
-                exit_on_err(e.to_string())
-            }
+            write_line(file, format_args!("SUB R{}, {}", vreg, -1 * varid));
         } else {
-            if let Err(e) = writeln!(file, "ADD R{}, {}", vreg, varid) {
-                exit_on_err(e.to_string())
-            }
+            write_line(file, format_args!("ADD R{}, {}", vreg, varid));
         }
         return vreg;
     }
@@ -187,18 +179,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         ASTNode::STR(s) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-            if let Err(e) = writeln!(file, "MOV R{},{}", register, s) {
-                log::error!("[code_gen] Write Error to file : {}", e);
-            }
+            write_line(file, format_args!("MOV R{},{}", register, s));
             registers[register].1 = 0;
             register
         }
         ASTNode::INT(n) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-            if let Err(e) = writeln!(file, "MOV R{},{}", register, n) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("MOV R{},{}", register, n));
             registers[register].1 = *n;
             register
         }
@@ -209,7 +197,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
-            let baseaddrreg = __load_variable(file, name, refr);
+            let baseaddrreg = __load_variable(file, name);
 
             let mut registers = REGISTERS.lock().unwrap();
             registers[baseaddrreg].1 =
@@ -226,9 +214,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     ASTNode::INT(num) => {
                         let offsetreg = get_reg();
 
-                        if let Err(e) = writeln!(file, "MOV R{},{}", offsetreg, num) {
-                            exit_on_err(e.to_string());
-                        }
+                        write_line(file, format_args!("MOV R{},{}", offsetreg, num));
 
                         if i != indices.len() - 1 {
                             let indexmulreg = get_reg();
@@ -240,9 +226,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                                 exit_on_err(e.to_string());
                             }
 
-                            if let Err(e) = writeln!(file, "MUL R{}, R{}", offsetreg, indexmulreg) {
-                                exit_on_err(e.to_string());
-                            }
+                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
 
                             registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
 
@@ -251,9 +235,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         }
 
                         let mut registers = REGISTERS.lock().unwrap();
-                        if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
-                            exit_on_err(e.to_string());
-                        }
+                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
                         registers[baseaddrreg].1 += registers[offsetreg].1;
 
                         std::mem::drop(registers);
@@ -283,9 +265,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                                 exit_on_err(e.to_string());
                             }
 
-                            if let Err(e) = writeln!(file, "MUL R{}, R{}", offsetreg, indexmulreg) {
-                                exit_on_err(e.to_string());
-                            }
+                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
 
                             registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
 
@@ -294,9 +274,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         }
                         let mut registers = REGISTERS.lock().unwrap();
 
-                        if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
-                            exit_on_err(e.to_string());
-                        }
+                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
                         registers[baseaddrreg].1 += registers[offsetreg].1;
 
                         std::mem::drop(registers);
@@ -330,9 +308,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                                 exit_on_err(e.to_string());
                             }
 
-                            if let Err(e) = writeln!(file, "MUL R{}, R{}", offsetreg, indexmulreg) {
-                                exit_on_err(e.to_string());
-                            }
+                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
 
                             registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
 
@@ -341,9 +317,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         }
 
                         let mut registers = REGISTERS.lock().unwrap();
-                        if let Err(e) = writeln!(file, "ADD R{}, R{}", baseaddrreg, offsetreg) {
-                            exit_on_err(e.to_string());
-                        }
+                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
                         registers[baseaddrreg].1 += registers[offsetreg].1;
 
                         std::mem::drop(registers);
@@ -353,9 +327,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 };
             }
             if refr == false {
-                if let Err(e) = writeln!(file, "MOV R{}, [R{}]", baseaddrreg, baseaddrreg) {
-                    exit_on_err(e.to_string());
-                }
+                write_line(
+                    file,
+                    format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
+                );
             }
             return baseaddrreg;
         }
@@ -373,9 +348,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "GT {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("GT {}, {}", left_operand, right_operand));
                     let result: i64 = (registers[left_register].1 > registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -393,9 +366,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "LT {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("LT {}, {}", left_operand, right_operand));
                     let result: i64 = (registers[left_register].1 < registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -413,9 +384,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "GE {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("GE {}, {}", left_operand, right_operand));
                     let result: i64 = (registers[left_register].1 >= registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -433,9 +402,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "LE {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("LE {}, {}", left_operand, right_operand));
                     let result: i64 = (registers[left_register].1 <= registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -453,9 +420,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "EQ {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("EQ {}, {}", left_operand, right_operand));
                     let result: i64 = (registers[left_register].1 == registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -473,9 +438,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "NE {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("NE {}, {}", left_operand, right_operand));
                     let result: i64 = (registers[left_register].1 != registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -493,9 +456,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "ADD {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(
+                        file,
+                        format_args!("ADD {}, {}", left_operand, right_operand),
+                    );
                     let result: i64 = registers[left_register].1 + registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
@@ -511,9 +475,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "SUB {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(
+                        file,
+                        format_args!("SUB {}, {}", left_operand, right_operand),
+                    );
                     let result: i64 = registers[left_register].1 - registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
@@ -529,9 +494,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "MUL {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(
+                        file,
+                        format_args!("MUL {}, {}", left_operand, right_operand),
+                    );
                     let result: i64 = registers[left_register].1 * registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
@@ -547,9 +513,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_operand: String =
                         "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "DIV {}, {}", left_operand, right_operand) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(
+                        file,
+                        format_args!("DIV {}, {}", left_operand, right_operand),
+                    );
                     let result: i64 = registers[left_register].1 / registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
@@ -562,9 +529,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
                     let mut registers = REGISTERS.lock().unwrap();
-                    if let Err(e) = writeln!(file, "MOD R{}, R{}", left_register, right_register) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(
+                        file,
+                        format_args!("MOD R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = registers[left_register].1 % registers[right_register].1;
                     let lower_register = min(left_register, right_register);
                     registers[lower_register].1 = result;
@@ -576,9 +544,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Equals => {
                     let left_register: usize = __code_gen(lhs, file, true).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    if let Err(e) = writeln!(file, "MOV [R{}],R{}", left_register, right_register) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(
+                        file,
+                        format_args!("MOV [R{}],R{}", left_register, right_register),
+                    );
                     free_reg(left_register);
                     free_reg(right_register);
                     25
@@ -652,9 +621,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     indices: _,
                 } => {
                     let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
-                    if let Err(e) = writeln!(file, "MOV R{},[R{}]", regaddr, regaddr) {
-                        exit_on_err(e.to_string());
-                    }
+                    write_line(file, format_args!("MOV R{},[R{}]", regaddr, regaddr));
                     return regaddr;
                 }
                 _ => {
@@ -679,9 +646,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         paramlist: _,
                         flabel,
                     } => {
-                        if let Err(e) = writeln!(file, "CALL L{}", flabel) {
-                            exit_on_err(e.to_string())
-                        }
+                        write_line(file, format_args!("CALL L{}", flabel));
                     }
                     _ => exit_on_err("Function not declared".to_string()),
                 }
@@ -716,9 +681,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         }
         ASTNode::MainNode { decl, body } => {
             //this node is traverse after all function def nodes,
-            if let Err(e) = writeln!(file, "L{}:", get_function_label(&"main".to_owned())) {
-                exit_on_err(e.to_string());
-            }
+            write_line(
+                file,
+                format_args!("L{}:", get_function_label(&"main".to_owned())),
+            );
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(local_table) = ft.get("main") {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -726,12 +692,8 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 std::mem::drop(ft);
                 std::mem::drop(lst);
 
-                if let Err(e) = writeln!(file, "PUSH BP\nMOV BP,SP",) {
-                    exit_on_err(e.to_string());
-                }
-                if let Err(e) = writeln!(file, "ADD SP, {}", get_ldecl_storage(decl)) {
-                    exit_on_err(e.to_string());
-                }
+                write_line(file, format_args!("PUSH BP\nMOV BP,SP",));
+                write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
                 //idk
                 let mut fs = FSTACK.lock().unwrap();
                 fs.push(("main".to_string(), get_ldecl_storage(decl)));
@@ -786,9 +748,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(ft);
             std::mem::drop(lst);
 
-            if let Err(e) = writeln!(file, "ADD SP, {}", get_ldecl_storage(decl)) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(_local_table) = ft.get(fname) {
                 let mut fs = FSTACK.lock().unwrap();
@@ -823,9 +783,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(label_count);
             let result: usize = __code_gen(expr, file, false).try_into().unwrap();
             //Generate code for the expression
-            if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l1) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("JZ R{}, L{}", result, l1));
             //Free the register
             free_reg(result);
             //Drop label_count so that nested cases can be handled
@@ -833,17 +791,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             __code_gen(xif, file, false);
             //result is 0 as xif is a stmtlist
             //Jmp to L2 if its else case
-            if let Err(e) = writeln!(file, "JMP L{}", l2) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("JMP L{}", l2));
             //add label count for exit case
-            if let Err(e) = writeln!(file, "L{}:", l1) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("L{}:", l1));
             __code_gen(xelse, file, false);
-            if let Err(e) = writeln!(file, "L{}:", l2) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("L{}:", l2));
             25
         }
         /* While Node
@@ -861,9 +813,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
 
             let l1 = label_count.clone();
             //Create a new label
-            if let Err(e) = writeln!(file, "L{}:", l1) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("L{}:", l1));
             (*label_count) += 1;
 
             let l2 = label_count.clone();
@@ -876,9 +826,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(while_tracker);
             let result: usize = __code_gen(expr, file, false).try_into().unwrap();
             //Generate code for the expression
-            if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l2) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("JZ R{}, L{}", result, l2));
             //Free the register
             free_reg(result);
             //generate if case flow
@@ -889,13 +837,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let mut while_tracker = WHILE_TRACKER.lock().unwrap();
             while_tracker.pop();
             while_tracker.pop();
-            if let Err(e) = writeln!(file, "JMP L{}", l1) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("JMP L{}", l1));
             //add label count for exit case
-            if let Err(e) = writeln!(file, "L{}:", l2) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("L{}:", l2));
             //increment label_count
             25
         }
@@ -914,17 +858,13 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(label_count);
             let result: usize = __code_gen(expr, file, false).try_into().unwrap();
             //Generate code for the expression
-            if let Err(e) = writeln!(file, "JZ R{}, L{}", result, l1) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("JZ R{}, L{}", result, l1));
             //Free the register
             free_reg(result);
             //generate if case flow
             __code_gen(xif, file, false);
             //result is 0 as xif is a stmtlist
-            if let Err(e) = writeln!(file, "L{}:", l1) {
-                exit_on_err(e.to_string());
-            }
+            write_line(file, format_args!("L{}:", l1));
             //increment label_count
             25
         }
@@ -1053,9 +993,7 @@ pub fn code_gen(root: &ASTNode, filename: String) -> usize {
                 .expect("[code_gen] Error truncating existing file");
             __header_gen(&file);
             let result: usize = __code_gen(root, &file, false);
-            if let Err(e) = writeln!(file, "PUSH R{}", result) {
-                exit_on_err(e.to_string());
-            }
+            write_line(&file, format_args!("PUSH R{}", result));
             let gst = GLOBALSYMBOLTABLE.lock().unwrap();
             for (k, v) in gst.iter() {
                 match v {
