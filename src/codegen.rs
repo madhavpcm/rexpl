@@ -4,12 +4,9 @@ use crate::validation::*;
 
 use lazy_static::lazy_static; // 1.4.0
 use std::cmp::min;
-use std::collections::HashMap;
 use std::collections::LinkedList;
-use std::fmt::format;
 use std::fs::{File, OpenOptions};
-use std::io::{Error, Write};
-use std::process::exit;
+use std::io::Write;
 use std::sync::Mutex;
 
 //global mutable arrays must be guarded with a mutex :(
@@ -29,7 +26,7 @@ lazy_static! {
     //Need a stack to call F(F(F(5))) type calls
     pub static ref REGISTER_STACK: Mutex<Vec<Vec<(bool, i64)>>> = Mutex::new(Vec::default());
     //TODO remove this stack
-    pub static ref FSTACK: Mutex<Vec<(String, usize)>> = Mutex::new(Vec::default());
+    pub static ref FSTACK: Mutex<(String,usize)> = Mutex::new((String::default(),0));
 }
 
 //Wrap error and write to file
@@ -77,7 +74,7 @@ fn __push_args(file: &File, arglist: &LinkedList<ASTNode>, refr: bool) {
     }
 }
 //function to backup live registers
-fn __backup_registers(mut file: &File) {
+fn __backup_registers(file: &File) {
     let mut registers = REGISTERS.lock().unwrap();
     let mut rs = REGISTER_STACK.lock().unwrap();
     rs.push(registers.clone());
@@ -105,7 +102,7 @@ fn __get_safe_register() -> usize {
     0
 }
 //function to restore register context
-fn __restore_register(mut file: &File, safe_register: usize) {
+fn __restore_register(file: &File, safe_register: usize) {
     let mut rs = REGISTER_STACK.lock().unwrap();
     let mut registers = rs.last().unwrap().clone();
     for i in (0..MAX_REGISTERS).rev() {
@@ -661,8 +658,8 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             ret_reg
         }
         ASTNode::ReturnNode { expr } => {
-            let mut fs = FSTACK.lock().unwrap();
-            let (fname, storage) = fs.last().unwrap().clone();
+            let fs = FSTACK.lock().unwrap();
+            let (_fname, storage) = fs.clone();
             std::mem::drop(fs);
 
             let retreg = __code_gen(expr, file, refr);
@@ -696,7 +693,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
                 //idk
                 let mut fs = FSTACK.lock().unwrap();
-                fs.push(("main".to_string(), get_ldecl_storage(decl)));
+                *fs = ("main".to_string(), get_ldecl_storage(decl));
                 std::mem::drop(fs);
 
                 __backup_registers(file);
@@ -706,9 +703,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 let mut registers = REGISTERS.lock().unwrap();
                 *registers = vec![(false, 0); MAX_REGISTERS];
                 std::mem::drop(registers);
-
-                let mut fs = FSTACK.lock().unwrap();
-                fs.pop();
 
                 __xsm_exit_syscall(file);
             } else {
@@ -734,33 +728,23 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             decl,
             body,
         } => {
-            if let Err(e) = writeln!(
+            write_line(
                 file,
-                "L{}:\nBRKP\nPUSH BP\nMOV BP,SP",
-                get_function_label(fname)
-            ) {
-                exit_on_err(e.to_string());
-            }
-            let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
-            let ft = FUNCTION_TABLE.lock().unwrap();
-
-            *lst = ft.get(fname).unwrap().clone();
-            std::mem::drop(ft);
-            std::mem::drop(lst);
-
+                format_args!("L{}:\nBRKP\nPUSH BP\nMOV BP,SP", get_function_label(fname)),
+            );
             write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(_local_table) = ft.get(fname) {
+                let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+                *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();
-                fs.push((fname.clone(), get_ldecl_storage(decl)));
+                *fs = (fname.clone(), get_ldecl_storage(decl));
                 std::mem::drop(ft);
+                std::mem::drop(lst);
                 std::mem::drop(fs);
 
                 __code_gen(&**body, file, false);
             }
-            let mut fs = FSTACK.lock().unwrap();
-            fs.pop();
-            std::mem::drop(fs);
             25
         }
         /*
@@ -960,25 +944,19 @@ fn __xsm_write_syscall(file: &File, var: usize) -> usize {
 /*
  * Meta function to generate xsm code for Read Syscall of expos
  */
-fn __xsm_read_syscall(mut file: &File, var: usize) -> usize {
-    0
-}
 
 /*
  * Meta function to generate xsm code for Exit Syscall of expos
  */
-fn __xsm_exit_syscall(mut file: &File) {
+fn __xsm_exit_syscall(file: &File) {
     let register = get_reg();
-    if let Err(e) = writeln!(file, "PUSH R0\nINT 10") {
-        exit_on_err(e.to_string());
-    }
+    write_line(file, format_args!("PUSH R0\nINT 10"));
     free_reg(register);
 }
 fn __print_gst() {
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
 
     log::info!("Global symbol table has {} symbols", gst.len());
-    for (k, v) in gst.iter() {}
 }
 pub fn code_gen(root: &ASTNode, filename: String) -> usize {
     let f = OpenOptions::new()
@@ -988,29 +966,12 @@ pub fn code_gen(root: &ASTNode, filename: String) -> usize {
         .open(filename.as_str());
 
     match f {
-        Ok(mut file) => {
+        Ok(file) => {
             file.set_len(0)
                 .expect("[code_gen] Error truncating existing file");
             __header_gen(&file);
             let result: usize = __code_gen(root, &file, false);
             write_line(&file, format_args!("PUSH R{}", result));
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            for (k, v) in gst.iter() {
-                match v {
-                    GSymbol::Func {
-                        ret_type,
-                        paramlist,
-                        flabel,
-                    } => {
-                        log::info!("Function {} :: {}", k, flabel);
-                    }
-                    GSymbol::Var {
-                        vartype,
-                        varid,
-                        varindices,
-                    } => continue,
-                }
-            }
             __xsm_exit_syscall(&file);
             log::trace!("Generated Object file: {}", filename.as_str());
             result

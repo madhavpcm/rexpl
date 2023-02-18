@@ -604,7 +604,6 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
                         paramlist: b,
                         flabel: _,
                     } => Ok((&**a == b) && (r1 == r2)),
-                    _ => Ok(false),
                 }
             } else {
                 Ok(false)
@@ -629,26 +628,6 @@ fn compare_arglist_paramlist(arglist: &LinkedList<ASTNode>, paramlist: &LinkedLi
         }
     }
     true
-}
-/*
- * Function to validate the type of argument list to paramlist
- */
-pub fn validate_arglist(fname: &String, arglist: &LinkedList<ASTNode>) -> Result<bool, ()> {
-    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-    if let Some(functable) = gst.get(fname) {
-        match functable {
-            GSymbol::Func {
-                ret_type: _,
-                paramlist,
-                flabel: _,
-            } => Ok(compare_arglist_paramlist(arglist, paramlist)),
-            _ => Err(exit_on_err(
-                fname.clone() + " is declared as variable, not a function",
-            )),
-        }
-    } else {
-        Ok(false)
-    }
 }
 //Gets the label of a function
 pub fn get_function_label(fname: &String) -> usize {

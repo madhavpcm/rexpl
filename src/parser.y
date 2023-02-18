@@ -75,7 +75,7 @@ MainBlock -> Result<ASTNode,()>:
 			body: Box::new(body_),
 		};
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
-		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+		let lst = LOCALSYMBOLTABLE.lock().unwrap();
 		ft.insert(
 			"main".to_string(),
 			lst.clone()
@@ -221,7 +221,7 @@ LVarList -> Result<VarList,()>:
 	{
 		let var = $3?;
 		match var {
-			VarList::Node { var,refr,indices,next}=> {
+			VarList::Node { var,refr,indices,next:_}=> {
 				let node = VarList::Node{
 					var:var,
 					refr:refr,
@@ -239,7 +239,7 @@ LVarList -> Result<VarList,()>:
 	{
 		let var = $4?;
 		match var {
-			VarList::Node { var,refr:_,indices,next}=> {
+			VarList::Node { var,refr:_,indices,next:_}=> {
 				Ok(VarList::Node{
 					var:var,
 					refr:true,
@@ -280,7 +280,7 @@ VarList -> Result<VarList,()>:
 	{
 		let var = $3?;
 		match var {
-			VarList::Node { var,refr,indices,next}=> {
+			VarList::Node { var,refr,indices,next:_}=> {
 				Ok(VarList::Node{
 					var:var,
 					refr:refr,
@@ -297,7 +297,7 @@ VarList -> Result<VarList,()>:
 	{
 		let var = $4?;
 		match var {
-			VarList::Node { var,refr:_,indices,next}=> {
+			VarList::Node { var,refr:_,indices,next:_}=> {
 				Ok(VarList::Node{
 					var:var,
 					refr:true,
@@ -439,7 +439,7 @@ Param -> Result<LinkedList<Param>,()>:
 		let var = $2?;
         let vtype = $1?;
 		match var {
-			VarList::Node { var,refr:_,indices,next}=> {
+			VarList::Node { var,refr:_,indices,next:_}=> {
 				if indices != Vec::default() {
 					exit_on_err("Arrays cannot be used as a function parameter. Use a pointer instead.".to_owned());
 				}
@@ -617,8 +617,6 @@ OutputStmt -> Result<ASTNode, ()>:
 AssgStmt -> Result<ASTNode, ()>:
 	Variable '=' Expr ';'
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
 		let lhs = $1?;
 		let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -636,8 +634,6 @@ AssgStmt -> Result<ASTNode, ()>:
 	}
 	| '*' Variable '=' Expr ';'
 	{
-		let v = $3.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
 		let lhs = $2?;
 		let rhs = $4?;
 		let node = ASTNode::BinaryNode{
@@ -680,8 +676,6 @@ InputStmt -> Result<ASTNode, ()>:
 Expr -> Result<ASTNode,()>:
 	Expr '<' Expr 
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		
@@ -700,8 +694,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '>' Expr 
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -719,8 +711,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '<=' Expr 
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -738,8 +728,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '>=' Expr 
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -757,8 +745,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '!=' Expr 
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -776,8 +762,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '==' Expr 
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -795,8 +779,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '+' Expr
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -814,8 +796,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '-' Expr
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -833,8 +813,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '*' Expr
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -852,8 +830,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '/' Expr
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -871,8 +847,6 @@ Expr -> Result<ASTNode,()>:
 	}
 	| Expr '%' Expr
 	{
-		let v = $2.map_err(|_| ())?;
-		let var = parse_string($lexer.span_str(v.span())).unwrap();
         let lhs = $1?;
         let rhs = $3?;
 		let node = ASTNode::BinaryNode{
@@ -1024,6 +998,4 @@ VariableExpr -> Result<ASTNode,()>:
 use crate::parserlib::{*};
 use crate::validation::{*};
 use crate::codegen::exit_on_err;
-use crate::codegen::LABEL_COUNT;
-use std::collections::HashMap;
 use std::collections::LinkedList;
