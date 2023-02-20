@@ -341,11 +341,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Gt => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("GT {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("GT R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 > registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -359,11 +359,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Lt => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("LT {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("LT R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 < registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -377,11 +377,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Gte => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("GE {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("GE R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 >= registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -395,11 +395,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Lte => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("LE {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("LE R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 <= registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -413,11 +413,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Ee => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("EQ {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("EQ R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 == registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -431,11 +431,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Ne => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("NE {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("NE R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 != registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -449,13 +449,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Plus => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("ADD {}, {}", left_operand, right_operand),
+                        format_args!("ADD R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 + registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -468,13 +465,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Minus => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("SUB {}, {}", left_operand, right_operand),
+                        format_args!("SUB R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 - registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -487,13 +481,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Star => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("MUL {}, {}", left_operand, right_operand),
+                        format_args!("MUL R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 * registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -506,13 +497,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Slash => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("DIV {}, {}", left_operand, right_operand),
+                        format_args!("DIV R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 / registers[right_register].1;
                     let lower_register = min(left_register, right_register);
