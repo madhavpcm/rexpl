@@ -9,8 +9,8 @@ pub fn getexprtype(node: &ASTNode) -> Option<ASTExprType> {
                 Some(ASTExprType::Null)
             }
         },
-        ASTNode::STR(_) => Some(ASTExprType::String),
-        ASTNode::INT(_) => Some(ASTExprType::Int),
+        ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
+        ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
         ASTNode::VAR { name, indices: _ } => getvartype(name),
         ASTNode::UnaryNode { op, ptr } => match op {
             ASTNodeType::Deref => getexprtype(ptr),
@@ -240,41 +240,6 @@ pub fn getvarindices(name: &String) -> Option<Vec<usize>> {
     }
     None
 }
-pub fn get_ldecl_storage(decllist: &Box<LinkedList<ASTNode>>) -> usize {
-    let mut size = 0;
-    for i in decllist.iter() {
-        match i {
-            ASTNode::DeclNode { var_type: _, list } => {
-                let mut ptr = &**list;
-                loop {
-                    match ptr {
-                        VarList::Node {
-                            var: _,
-                            refr: _,
-                            indices,
-                            next,
-                        } => {
-                            let mut varsize = 1;
-                            for i in indices {
-                                varsize = varsize * i;
-                            }
-                            size += varsize;
-                            ptr = &**next;
-                        }
-                        VarList::Null => {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ => {
-                panic!("err");
-            }
-        }
-    }
-    size
-}
-
 pub fn getvarid(name: &String) -> Option<i64> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
@@ -615,7 +580,10 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
 /*
  * Function to validate the pamalist in declaration to definition
  */
-fn compare_arglist_paramlist(arglist: &LinkedList<ASTNode>, paramlist: &LinkedList<Param>) -> bool {
+fn compare_arglist_paramlist(
+    arglist: &LinkedList<ASTNode>,
+    paramlist: &LinkedList<VarNode>,
+) -> bool {
     if arglist.len() != paramlist.len() {
         return false;
     }

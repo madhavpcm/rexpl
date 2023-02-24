@@ -1,9 +1,11 @@
 use lazy_static::lazy_static; // 1.4.0
+use std::collections::btree_map::Entry;
 use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt::{Debug, Formatter};
 use std::sync::Mutex;
 
+use crate::codegen::exit_on_err;
 use crate::codegen::LABEL_COUNT;
 use crate::validation::validate_locality;
 
@@ -16,13 +18,16 @@ lazy_static! {
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
     pub static ref LOCALSYMBOLTABLE: Mutex<HashMap<String, LSymbol>> =
         Mutex::new(HashMap::default());
-    pub static ref CURR_TYPE: Mutex<ASTExprType> = Mutex::new(ASTExprType::Null);
+    pub static ref CURR_TYPE: Mutex<ASTExprType> =
+        Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
+    pub static ref DECL_TYPE: Mutex<ASTExprType> =
+        Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
 }
 #[derive(Debug, Clone)]
 pub enum GSymbol {
     Func {
         ret_type: ASTExprType,
-        paramlist: LinkedList<Param>,
+        paramlist: LinkedList<VarNode>,
         flabel: usize,
     },
     Var {
@@ -31,6 +36,7 @@ pub enum GSymbol {
         varindices: Vec<usize>,
     },
 }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LSymbol {
     Var {
@@ -65,44 +71,52 @@ pub enum ASTNodeType {
     Ee,
     Ne,
 }
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum PrimitiveType {
+    Int,
+    String,
+    Bool,
+    Void,
+    Null,
+}
 //Overload for printing exprtype
-impl std::fmt::Display for ASTExprType {
+impl std::fmt::Display for PrimitiveType {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            ASTExprType::Int => write!(f, "int_t"),
-            ASTExprType::String => write!(f, "str_t"),
-            ASTExprType::Bool => write!(f, "bool_t"),
-            ASTExprType::IntRef => write!(f, "intptr_t"),
-            ASTExprType::StringRef => write!(f, "strptr_t"),
+            PrimitiveType::Int => write!(f, "int_t"),
+            PrimitiveType::String => write!(f, "str_t"),
+            PrimitiveType::Bool => write!(f, "bool_t"),
+            PrimitiveType::Void => write!(f, "void_t"),
             _ => {
                 write!(f, "null_t")
             }
         }
     }
 }
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+
+// an expression could be a primitive type or a pointer to a primitive type or so on..
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ASTExprType {
-    Int,
-    String,
-    IntRef,
-    StringRef,
-    Bool,
-    Null,
+    Primitive(PrimitiveType),
+    Pointer(Box<ASTExprType>),
 }
 
 impl ASTExprType {
-    fn refrtype(&self) -> Result<Self, &'static str> {
+    //Only used by parser
+    pub fn set_pointer_base(&mut self, p: PrimitiveType) {
         match self {
-            ASTExprType::String => Ok(ASTExprType::StringRef),
-            ASTExprType::Int => Ok(ASTExprType::IntRef),
-            _ => Err("Cannot refr to this type"),
+            ASTExprType::Primitive(t) => {
+                *t = p.clone();
+            }
+            ASTExprType::Pointer(b) => {
+                b.set_pointer_base(p);
+            }
         }
     }
-    fn derefrtype(&self) -> Result<Self, &'static str> {
+    pub fn get_base_type(&self) -> PrimitiveType {
         match self {
-            ASTExprType::StringRef => Ok(ASTExprType::String),
-            ASTExprType::IntRef => Ok(ASTExprType::Int),
-            _ => Err("Cannot derefr to this type"),
+            ASTExprType::Primitive(p) => p.clone(),
+            ASTExprType::Pointer(p) => Self::get_base_type(p),
         }
     }
 }
@@ -111,30 +125,87 @@ impl ASTExprType {
 pub enum ASTError {
     TypeError(String),
 }
-#[derive(Debug, Eq, PartialEq, Clone)]
-pub struct Param {
-    pub var: String,
-    pub vartype: ASTExprType,
-    pub indices: Vec<usize>,
-}
-impl From<Param> for LinkedList<Param> {
-    fn from(param: Param) -> Self {
+impl From<VarNode> for LinkedList<VarNode> {
+    fn from(param: VarNode) -> Self {
         let mut list = LinkedList::new();
         list.push_back(param);
         list
     }
 }
 #[derive(Debug, Eq, PartialEq, Clone)]
-pub enum VarList {
-    Node {
-        var: String,
-        refr: bool,
-        indices: Vec<usize>,
-        next: Box<VarList>,
-    },
-    Null,
+pub struct VarNode {
+    pub varname: String,
+    pub vartype: ASTExprType,
+    pub varindices: Vec<usize>,
+}
+impl VarNode {
+    fn install_to_lst(self) {
+        //check if this is already used
+        validate_locality(self.varname.clone());
+        let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+        let mut varid = LOCALVARID.lock().unwrap();
+
+        lst.insert(
+            self.varname,
+            LSymbol::Var {
+                vartype: (self.vartype.clone()),
+                varid: (varid.clone()),
+                varindices: (self.varindices.clone()),
+            },
+        );
+        let mut size = 1;
+        for i in self.varindices.iter() {
+            size *= i;
+        }
+        *varid += i64::try_from(size).unwrap();
+    }
+    fn install_to_gst(self) {
+        let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+        let mut varid = VARID.lock().unwrap();
+        //check if this is already  used
+        if gst.contains_key(self.varname.as_str()) {
+            exit_on_err(
+                "Global symbol + ".to_owned() + self.varname.as_str() + " is already declared.",
+            )
+        }
+        gst.insert(
+            self.varname,
+            GSymbol::Var {
+                vartype: (self.vartype.clone()),
+                varid: (varid.clone()),
+                varindices: (self.varindices.clone()),
+            },
+        );
+        let mut size = 1;
+        for i in self.varindices.iter() {
+            size *= i;
+        }
+        *varid += size;
+    }
 }
 
+pub fn install_func_to_gst(
+    funcname: String,
+    returntype: ASTExprType,
+    paramlist: &LinkedList<VarNode>,
+) {
+    let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    let mut varid = VARID.lock().unwrap();
+    let mut label_count = LABEL_COUNT.lock().unwrap();
+    //check if this is already  used
+    if gst.contains_key(funcname.as_str()) {
+        exit_on_err("Global symbol + ".to_owned() + funcname.as_str() + " is already declared.")
+    }
+    gst.insert(
+        funcname,
+        GSymbol::Func {
+            ret_type: (returntype.clone()),
+            paramlist: (paramlist.clone()),
+            flabel: (label_count.clone()),
+        },
+    );
+    *label_count += 1;
+}
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ASTNode {
     INT(i64),
@@ -166,19 +237,10 @@ pub enum ASTNode {
         expr: Box<ASTNode>,
         xdo: Box<ASTNode>,
     },
-    DeclNode {
-        var_type: ASTExprType,
-        list: Box<VarList>,
-    },
-    FuncDeclNode {
-        fname: String,
-        ret_type: ASTExprType,
-        paramlist: Box<LinkedList<Param>>,
-    },
     FuncDefNode {
         fname: String,
         ret_type: ASTExprType,
-        paramlist: Box<LinkedList<Param>>,
+        paramlist: Box<LinkedList<VarNode>>,
         decl: Box<LinkedList<ASTNode>>,
         body: Box<ASTNode>,
     },
@@ -273,151 +335,26 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
 /*
  * Function to insert parameter list to local symbol table
  */
-pub fn __lst_install_params(paramlist: &LinkedList<Param>) {
+pub fn __lst_install_params(paramlist: &LinkedList<VarNode>) {
     //Check if this variable is in Global Symbol Table
     let mut localid = -3;
     for param in paramlist {
-        validate_locality(param.var.clone());
+        validate_locality(param.varname.clone());
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         lst.insert(
-            param.var.clone(),
+            param.varname.clone(),
             LSymbol::Var {
                 vartype: (param.vartype),
                 varid: (localid),
-                varindices: (param.indices.clone()),
+                varindices: (param.varindices.clone()),
             },
         );
         let mut siz = 1;
-        for i in &param.indices {
+        for i in &param.varindices {
             siz *= i;
         }
         localid -= i64::try_from(siz).unwrap();
     }
-}
-/*
- * Function to insert declared variabled to local symbol table
- */
-pub fn __lst_install_variables(vtype: &ASTExprType, l: &VarList) {
-    //Check if this variable is in Global Symbol Table
-    let mut ptr = l;
-    let mut localid = LOCALVARID.lock().unwrap();
-    loop {
-        match ptr {
-            VarList::Node {
-                var,
-                refr,
-                indices,
-                next,
-            } => {
-                validate_locality(var.clone());
-                let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
-                let itype;
-                if refr == &true {
-                    itype = vtype.refrtype().unwrap();
-                } else {
-                    itype = vtype.clone();
-                }
-                lst.insert(
-                    var.clone(),
-                    LSymbol::Var {
-                        vartype: (itype),
-                        varid: (*localid),
-                        varindices: (indices.clone()),
-                    },
-                );
-                let mut siz = 1;
-                for i in indices {
-                    siz *= i;
-                }
-                *localid += i64::try_from(siz).unwrap();
-                ptr = &**next;
-            }
-            VarList::Null => {
-                break;
-            }
-        }
-    }
-}
-/*
- * Meta function to map each variable to its type
- *
- * This hash determins the virtual address of the variable in xsm assembly
- *
- * Type checking is also performed with the data generated here
- */
-pub fn __gen_global_symbol_table(declnode: &ASTNode) {
-    match declnode {
-        ASTNode::FuncDeclNode {
-            fname,
-            ret_type: ret,
-            paramlist: plist,
-        } => {
-            let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            let mut label_count = LABEL_COUNT.lock().unwrap();
-            let l = label_count.clone();
-            *label_count += 1;
-
-            gst.insert(fname.to_string(), {
-                GSymbol::Func {
-                    ret_type: ret.clone(),
-                    paramlist: *plist.clone(),
-                    flabel: l,
-                }
-            });
-        }
-        ASTNode::DeclNode { var_type, list } => {
-            let mut ptr = *list.clone();
-            let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            let mut var_id = VARID.lock().unwrap();
-
-            loop {
-                match ptr {
-                    VarList::Node {
-                        var,
-                        refr,
-                        indices,
-                        next,
-                    } => {
-                        if gst.contains_key(&var) == true {
-                            log::error!(
-                                "Variable name: [{}] is already declared as a variable or function",
-                                var
-                            );
-                            std::process::exit(1);
-                        }
-                        let mut vart = var_type.clone();
-                        if refr == true {
-                            if vart == ASTExprType::String {
-                                vart = ASTExprType::StringRef;
-                            } else {
-                                vart = ASTExprType::IntRef;
-                            }
-                        }
-                        gst.insert(
-                            var,
-                            GSymbol::Var {
-                                vartype: vart.clone(),
-                                varid: var_id.clone(),
-                                varindices: indices.clone(),
-                            },
-                        );
-                        let mut size = 1;
-                        for i in indices {
-                            size = size * i;
-                        }
-                        *var_id = *var_id + size;
-                        ptr = *next;
-                    }
-                    VarList::Null => {
-                        break;
-                    }
-                }
-            }
-        }
-        _ => {
-            eprintln!("[parser] Decl Block error");
-        }
-    };
 }
 pub fn __parse_debug() {
     log::warn!("Im here");

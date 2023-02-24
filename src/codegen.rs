@@ -860,10 +860,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 .expect("[code_gen] Write error");
             25
         }
-        ASTNode::DeclNode {
-            var_type: _,
-            list: _,
-        } => 25,
         ASTNode::Null => 25,
     }
 }
