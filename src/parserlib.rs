@@ -1,5 +1,4 @@
 use lazy_static::lazy_static; // 1.4.0
-use std::collections::btree_map::Entry;
 use std::collections::HashMap;
 use std::collections::LinkedList;
 use std::fmt::{Debug, Formatter};
@@ -103,13 +102,13 @@ pub enum ASTExprType {
 
 impl ASTExprType {
     //Only used by parser
-    pub fn set_pointer_base(&mut self, p: PrimitiveType) {
+    pub fn set_base_type(&mut self, p: PrimitiveType) {
         match self {
             ASTExprType::Primitive(t) => {
                 *t = p.clone();
             }
             ASTExprType::Pointer(b) => {
-                b.set_pointer_base(p);
+                b.set_base_type(p);
             }
         }
     }
@@ -139,7 +138,7 @@ pub struct VarNode {
     pub varindices: Vec<usize>,
 }
 impl VarNode {
-    fn install_to_lst(self) {
+    pub fn install_to_lst(self) {
         //check if this is already used
         validate_locality(self.varname.clone());
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -159,7 +158,7 @@ impl VarNode {
         }
         *varid += i64::try_from(size).unwrap();
     }
-    fn install_to_gst(self) {
+    pub fn install_to_gst(self) {
         let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
         let mut varid = VARID.lock().unwrap();
         //check if this is already  used
@@ -240,8 +239,6 @@ pub enum ASTNode {
     FuncDefNode {
         fname: String,
         ret_type: ASTExprType,
-        paramlist: Box<LinkedList<VarNode>>,
-        decl: Box<LinkedList<ASTNode>>,
         body: Box<ASTNode>,
     },
     FuncCallNode {
@@ -255,7 +252,6 @@ pub enum ASTNode {
         expr: Box<ASTNode>,
     },
     MainNode {
-        decl: Box<LinkedList<ASTNode>>,
         body: Box<ASTNode>,
     },
     BreakNode,

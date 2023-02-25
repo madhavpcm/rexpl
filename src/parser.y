@@ -105,18 +105,18 @@ Start -> Result<ASTNode, ()>:
 MainBlock -> Result<ASTNode,()>:
 	DeclType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
-		let ldecl_ = $6.map_err(|_| ())?;
+		let ldecl_ = $6;
 		let body_ = $7.map_err(|_| ())?;
 		let node = ASTNode::MainNode{
-			decl: Box::new(ldecl_),
 			body: Box::new(body_),
 		};
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
-		let lst = LOCALSYMBOLTABLE.lock().unwrap();
+		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		ft.insert(
 			"main".to_string(),
 			lst.clone()
 		);
+		lst.clear();
 		Ok(node)
 	}
 	;
@@ -139,20 +139,15 @@ GDeclBlock -> ():
 	{
 	}
 	;
-LDeclList -> Result<LinkedList<ASTNode>, ()>:
+LDeclList -> ():
 	LDeclList LDecl 
 	{
-		let mut list  = LinkedList::new();
-		list.append(&mut ($1)?);
-		list.append(&mut ($2)?);
-		Ok(list)
+		$1;
+		$2;
 	}
-	|
-	LDecl
+	| LDecl
 	{
-		let mut list = LinkedList::new();
-		list.append(&mut $1?);
-		Ok(list)
+		$1;
 	}
 	;
 GDeclList -> ():
@@ -166,16 +161,11 @@ GDeclList -> ():
 		$1;
 	}
 	;
-LDecl ->  Result<LinkedList<ASTNode>,()>:
+LDecl ->  ():
 	DeclType LLine ';'
 	{
-		let vtype = $1?;
-		let list = $2?;
-		let node = ASTNode::DeclNode{
-			var_type: vtype,
-			list: Box::new(list)
-		};
-		Ok(LinkedList::from(node))
+		$1;
+		$2;
 	}
 	;
 GDecl ->  ():
@@ -200,51 +190,48 @@ GItem -> ():
 	"VAR" '(' ParamList ')' 
 	{
 		let returntype = DECL_TYPE.lock().unwrap().clone();
-		let v = $1.map_err(|_| ())?;
+		let v = $1.map_err(|_| ()).unwrap();
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
-		let paramlist = $3?;
+		let paramlist = $3.unwrap();
 		install_func_to_gst(functionname,returntype,&paramlist);
 	}
 	| VarItem
 	{
-		let node = $1?;
-		let dt = DECL_TYPE.lock().unwrap();
-		node.vartype.set_base_type(dt.clone());
+		let node = $1.unwrap();
+		let dt = DECL_TYPE.lock().unwrap().clone();
+		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_gst();
-		std::mem::drop(dt);
 	}
 	;
 
 LLine -> ():
 	VarItem ',' LLine
 	{
-		let node = $1?;
-		let dt = DECL_TYPE.lock().unwrap();
-		node.vartype.set_base_type(dt.clone());
+		let node = $1.unwrap();
+		let dt = DECL_TYPE.lock().unwrap().clone();
+		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_lst();
-		std::mem::drop(dt);
-		$3?;
+		$3;
 	}
 	| VarItem 
 	{
-		let node =$1?;
-		let dt = DECL_TYPE.lock().unwrap();
-		node.vartype.set_base_type(dt.clone());
+		let node =$1.unwrap();
+		let dt = DECL_TYPE.lock().unwrap().clone();
+		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_lst();
-		std::mem::drop(dt);
 	}
 	;
 VarItem -> Result<VarNode, ()>:
 	VariableDef 
 	{
-		$1?
+		$1
 	} 
 	| PtrPtr VariableDef
 	{
 		let dt = DECL_TYPE.lock().unwrap();
 		let mut node= $2?;
 		node.vartype = $1?;
-		Ok(node);
+		Ok(node)
 	}
     ;
 FDefBlock -> Result<ASTNode,()>:
@@ -267,13 +254,9 @@ FDef ->Result<ASTNode,()>:
 	{
 		let v = $2.map_err(|_| ())?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
-		let ldecl_ = $7?;
-		let paramlist_ = $4?;
 		let node = ASTNode::FuncDefNode{
 			fname: funcname.clone(),
 			ret_type: $1?,
-			paramlist: Box::new(paramlist_),
-			decl: Box::new(ldecl_),
 			body: Box::new($8?),
 		};
 		if validate_ast_node(&node) == Ok(false) {
@@ -281,15 +264,20 @@ FDef ->Result<ASTNode,()>:
 				err : ASTError::TypeError("Function [".to_owned() + funcname.as_str() + "] declaration does not match with definition"),
 			});
 		}
+		$7;
+		let paramlist_ = $4?;
+
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
 		let mut lv = LOCALVARID.lock().unwrap();
-		*lv = 1;
+		//save localsymbol table for accessing in backend
 		ft.insert(
 			funcname,
 			lst.clone()
 		);
+		//reset data structures
 		lst.clear();
+		*lv = 1;
 		std::mem::drop(lv);
 		std::mem::drop(lst);
 		std::mem::drop(ft);
@@ -297,14 +285,13 @@ FDef ->Result<ASTNode,()>:
 	}
 	;
 
-LDeclBlock -> Result<LinkedList<ASTNode>,()>:
+LDeclBlock -> ():
 	"DECL" LDeclList "ENDDECL"
 	{
-		$2
+		$2;
 	}
 	| "DECL" "ENDDECL"
 	{
-        Ok(LinkedList::new())
 	}
 	;
 
@@ -360,12 +347,11 @@ VariableDef -> Result<VarNode,()>:
 	{
 		let v = $1.map_err(|_| ())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
-		let mut ll = LinkedList::new();
-		VarNode{
+		Ok(VarNode{
 			varname: var_,
 			vartype: ASTExprType::Primitive(PrimitiveType::Void),
 			varindices: vec![],
-		}
+		})
 	}
 	| "VAR" "[" "INT" "]"
 	{
@@ -373,11 +359,11 @@ VariableDef -> Result<VarNode,()>:
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
 		let v = $3.map_err(|_| ())?;
         let i= parse_usize($lexer.span_str(v.span())).unwrap();
-		VarNode{
+		Ok(VarNode{
 			varname: var_,
 			vartype: ASTExprType::Primitive(PrimitiveType::Void),
 			varindices: vec![i],
-		}
+		})
 	}
 	| "VAR" "[" "INT" "]" "[" "INT" "]"
 	{
@@ -387,11 +373,11 @@ VariableDef -> Result<VarNode,()>:
         let i= parse_usize($lexer.span_str(v.span())).unwrap();
 		let v = $6.map_err(|_| ())?;
         let j= parse_usize($lexer.span_str(v.span())).unwrap();
-		VarNode{
+		Ok(VarNode{
 			varname: var_,
 			vartype: ASTExprType::Primitive(PrimitiveType::Void),
 			varindices: vec![i,j],
-		}
+		})
 	}
 	;	
 //StateMents	

@@ -3,6 +3,7 @@ use crate::parserlib::*;
 use crate::validation::*;
 
 use lazy_static::lazy_static; // 1.4.0
+use std::cmp::max;
 use std::cmp::min;
 use std::collections::LinkedList;
 use std::fs::{File, OpenOptions};
@@ -26,13 +27,36 @@ lazy_static! {
     //Need a stack to call F(F(F(5))) type calls
     pub static ref REGISTER_STACK: Mutex<Vec<Vec<(bool, i64)>>> = Mutex::new(Vec::default());
     //TODO remove this stack
-    pub static ref FSTACK: Mutex<(String,usize)> = Mutex::new((String::default(),0));
+    pub static ref FSTACK: Mutex<(String,i64)> = Mutex::new((String::default(),0));
 }
 
 //Wrap error and write to file
 fn write_line(mut writer: &File, args: std::fmt::Arguments) {
     if let Err(e) = writeln!(writer, "{}", args) {
         exit_on_err(e.to_string());
+    }
+}
+/*
+ * Get the size of the local declaration
+ */
+fn __get_function_storage(fname: String) -> i64 {
+    let ft = FUNCTION_TABLE.lock().unwrap();
+    let mut max_size = 0;
+    if let Some(entry) = ft.get(&fname) {
+        for (
+            k,
+            LSymbol::Var {
+                vartype,
+                varid,
+                varindices,
+            },
+        ) in entry.iter()
+        {
+            max_size = max(varid.clone(), max_size);
+        }
+        return max_size;
+    } else {
+        return 0;
     }
 }
 /*
@@ -664,7 +688,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(registers);
             25
         }
-        ASTNode::MainNode { decl, body } => {
+        ASTNode::MainNode { body } => {
             //this node is traverse after all function def nodes,
             write_line(
                 file,
@@ -678,10 +702,13 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 std::mem::drop(lst);
 
                 write_line(file, format_args!("PUSH BP\nMOV BP,SP",));
-                write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
+                write_line(
+                    file,
+                    format_args!("ADD SP, {}", __get_function_storage("main")),
+                );
                 //idk
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = ("main".to_string(), get_ldecl_storage(decl));
+                *fs = ("main".to_string(), __get_function_storage("main"));
                 std::mem::drop(fs);
 
                 __backup_registers(file);
@@ -720,13 +747,16 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 file,
                 format_args!("L{}:\nBRKP\nPUSH BP\nMOV BP,SP", get_function_label(fname)),
             );
-            write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
+            write_line(
+                file,
+                format_args!("ADD SP, {}", __get_function_storage(decl)),
+            );
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(_local_table) = ft.get(fname) {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = (fname.clone(), get_ldecl_storage(decl));
+                *fs = (fname.clone(), __get_function_storage(decl));
                 std::mem::drop(ft);
                 std::mem::drop(lst);
                 std::mem::drop(fs);
