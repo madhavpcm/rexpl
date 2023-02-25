@@ -6,7 +6,6 @@ use std::sync::Mutex;
 
 use crate::codegen::exit_on_err;
 use crate::codegen::LABEL_COUNT;
-use crate::validation::validate_locality;
 
 lazy_static! {
     pub static ref FUNCTION_TABLE: Mutex<HashMap<String, HashMap<String, LSymbol>>> =
@@ -98,6 +97,7 @@ impl std::fmt::Display for PrimitiveType {
 pub enum ASTExprType {
     Primitive(PrimitiveType),
     Pointer(Box<ASTExprType>),
+    Error,
 }
 
 impl ASTExprType {
@@ -110,12 +110,21 @@ impl ASTExprType {
             ASTExprType::Pointer(b) => {
                 b.set_base_type(p);
             }
+            ASTError => {}
         }
     }
     pub fn get_base_type(&self) -> PrimitiveType {
         match self {
             ASTExprType::Primitive(p) => p.clone(),
             ASTExprType::Pointer(p) => Self::get_base_type(p),
+            ASTExprType::Error => PrimitiveType::Void,
+        }
+    }
+    pub fn depth(&self) -> usize {
+        match self {
+            ASTExprType::Pointer(p) => Self::depth(p) + 1,
+            ASTExprType::Primitive(_) => 1,
+            ASTExprType::Error => 0,
         }
     }
 }
@@ -138,9 +147,45 @@ pub struct VarNode {
     pub varindices: Vec<usize>,
 }
 impl VarNode {
+    pub fn validate_locality(self) {
+        let lst = LOCALSYMBOLTABLE.lock().unwrap();
+        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+        if let Some(entry) = gst.get(&self.varname) {
+            match entry {
+                GSymbol::Func {
+                    ret_type: _,
+                    paramlist: _,
+                    flabel: _,
+                } => {
+                    //exit if a function with similar name exists
+                    exit_on_err(
+                        "Parameter Symbol ".to_owned()
+                            + &self.varname.as_str()
+                            + " is already declared as a function",
+                    );
+                }
+                GSymbol::Var {
+                    vartype: _,
+                    varid: _,
+                    varindices: _,
+                } => {
+                    //Shadow global variable after warning user
+                    log::warn!(
+                        "Parameter Symbol {} is already declared as a variable in global scope",
+                        &self.varname.as_str()
+                    );
+                }
+            }
+        }
+        if lst.contains_key(&self.varname) == true {
+            exit_on_err(
+                "Parameter Symbol ".to_owned() + &self.varname.as_str() + " is already declared ",
+            );
+        }
+    }
     pub fn install_to_lst(self) {
         //check if this is already used
-        validate_locality(self.varname.clone());
+        Self::validate_locality(self);
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         let mut varid = LOCALVARID.lock().unwrap();
 
@@ -240,6 +285,7 @@ pub enum ASTNode {
         fname: String,
         ret_type: ASTExprType,
         body: Box<ASTNode>,
+        paramlist: LinkedList<VarNode>,
     },
     FuncCallNode {
         fname: String,
@@ -335,7 +381,7 @@ pub fn __lst_install_params(paramlist: &LinkedList<VarNode>) {
     //Check if this variable is in Global Symbol Table
     let mut localid = -3;
     for param in paramlist {
-        validate_locality(param.varname.clone());
+        param.validate_locality();
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         lst.insert(
             param.varname.clone(),

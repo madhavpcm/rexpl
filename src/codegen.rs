@@ -39,10 +39,10 @@ fn write_line(mut writer: &File, args: std::fmt::Arguments) {
 /*
  * Get the size of the local declaration
  */
-fn __get_function_storage(fname: String) -> i64 {
+fn __get_function_storage(fname: &String) -> i64 {
     let ft = FUNCTION_TABLE.lock().unwrap();
     let mut max_size = 0;
-    if let Some(entry) = ft.get(&fname) {
+    if let Some(entry) = ft.get(fname) {
         for (
             k,
             LSymbol::Var {
@@ -212,9 +212,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             register
         }
         ASTNode::VAR { name, indices } => {
-            if varinscope(name) == Ok(false) {
-                exit_on_err("Variable : [".to_owned() + name.as_str() + "] is not declared");
-            }
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
@@ -266,14 +263,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         name: _,
                         indices: _,
                     } => {
-                        if getexprtype(&*indices[i]) != Some(ASTExprType::Int) {
-                            exit_on_err(
-                                "Variable with invalid type used to index".to_owned()
-                                    + name
-                                    + ("[]".repeat(i)).as_str()
-                                    + "[x]",
-                            );
-                        }
                         let offsetreg = __code_gen(&*indices[i], file, false);
 
                         if i != indices.len() - 1 {
@@ -308,15 +297,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         lhs: _,
                         rhs: _,
                     } => {
-                        let exprtype = getexprtype(&*indices[i]);
-                        if exprtype != Some(ASTExprType::Int) {
-                            exit_on_err(
-                                "Invalid expression type used to index".to_owned()
-                                    + name
-                                    + ("[]".repeat(i)).as_str()
-                                    + "[x]",
-                            );
-                        }
                         let offsetreg = __code_gen(&*indices[i], file, false);
 
                         if i != indices.len() - 1 {
@@ -704,11 +684,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 write_line(file, format_args!("PUSH BP\nMOV BP,SP",));
                 write_line(
                     file,
-                    format_args!("ADD SP, {}", __get_function_storage("main")),
+                    format_args!("ADD SP, {}", __get_function_storage(&"main".to_owned())),
                 );
                 //idk
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = ("main".to_string(), __get_function_storage("main"));
+                *fs = (
+                    "main".to_string(),
+                    __get_function_storage(&"main".to_owned()),
+                );
                 std::mem::drop(fs);
 
                 __backup_registers(file);
@@ -725,11 +708,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             }
             25
         }
-        ASTNode::FuncDeclNode {
-            fname: _,
-            ret_type: _,
-            paramlist: _,
-        } => 25,
         /*
          * L{funclabel}:
          *    Subtract SP by declvars.size()
@@ -740,7 +718,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             fname,
             ret_type: _,
             paramlist: _,
-            decl,
             body,
         } => {
             write_line(
@@ -749,14 +726,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             );
             write_line(
                 file,
-                format_args!("ADD SP, {}", __get_function_storage(decl)),
+                format_args!("ADD SP, {}", __get_function_storage(fname)),
             );
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(_local_table) = ft.get(fname) {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = (fname.clone(), __get_function_storage(decl));
+                *fs = (fname.clone(), __get_function_storage(fname));
                 std::mem::drop(ft);
                 std::mem::drop(lst);
                 std::mem::drop(fs);
@@ -907,7 +884,7 @@ fn __header_gen(mut file: &File) {
     gst.insert(
         "main".to_string(),
         GSymbol::Func {
-            ret_type: (ASTExprType::Int),
+            ret_type: (ASTExprType::Primitive(PrimitiveType::Int)),
             paramlist: LinkedList::new(),
             flabel: (l),
         },

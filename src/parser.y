@@ -207,7 +207,7 @@ GItem -> ():
 LLine -> ():
 	VarItem ',' LLine
 	{
-		let node = $1.unwrap();
+		let mut node = $1.unwrap();
 		let dt = DECL_TYPE.lock().unwrap().clone();
 		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_lst();
@@ -215,7 +215,7 @@ LLine -> ():
 	}
 	| VarItem 
 	{
-		let node =$1.unwrap();
+		let mut node =$1.unwrap();
 		let dt = DECL_TYPE.lock().unwrap().clone();
 		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_lst();
@@ -254,18 +254,15 @@ FDef ->Result<ASTNode,()>:
 	{
 		let v = $2.map_err(|_| ())?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
+		let paramlist_ = $4?;
 		let node = ASTNode::FuncDefNode{
 			fname: funcname.clone(),
 			ret_type: $1?,
 			body: Box::new($8?),
+			paramlist: paramlist_.clone()
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-				err : ASTError::TypeError("Function [".to_owned() + funcname.as_str() + "] declaration does not match with definition"),
-			});
-		}
+		node.validate();
 		$7;
-		let paramlist_ = $4?;
 
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
@@ -434,11 +431,7 @@ Stmt -> Result<ASTNode,()>:
 		let node = ASTNode::ReturnNode{
 			expr: Box::new($2?)
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Return expression type mismatch".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	;
@@ -491,11 +484,7 @@ AssgStmt -> Result<ASTNode, ()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type mismatch at assignment".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| '*' Variable '=' Expr ';'
@@ -511,11 +500,7 @@ AssgStmt -> Result<ASTNode, ()>:
 			}),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type mismatch at assignment".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	;
@@ -551,11 +536,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type mismatch at <".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '>' Expr 
@@ -568,11 +549,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at >".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '<=' Expr 
@@ -585,11 +562,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at <=".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '>=' Expr 
@@ -602,11 +575,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at >=".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '!=' Expr 
@@ -619,11 +588,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at !=".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '==' Expr 
@@ -636,11 +601,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at ==".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '+' Expr
@@ -653,11 +614,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at +".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '-' Expr
@@ -670,11 +627,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at -".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '*' Expr
@@ -687,11 +640,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at *".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '/' Expr
@@ -704,11 +653,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at /".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| Expr '%' Expr
@@ -721,11 +666,7 @@ Expr -> Result<ASTNode,()>:
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Type error at %".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
     | '(' Expr ')'
@@ -756,11 +697,7 @@ Expr -> Result<ASTNode,()>:
 			fname: functionname, 
 			arglist: Box::new(LinkedList::new()),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-				err: ASTError::TypeError("Function call does not match declaration".to_string())
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| "VAR" '(' ArgList ')'
@@ -771,11 +708,7 @@ Expr -> Result<ASTNode,()>:
 			fname: functionname, 
 			arglist: Box::new($3?),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-				err: ASTError::TypeError("Function call does not match declaration".to_string())
-			})
-		}
+		node.validate();
 		Ok(node)
 	}
     ; 
@@ -796,6 +729,14 @@ Variable -> Result<ASTNode, ()>:
 		let v = $1.map_err(|_| ())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
 		let expr = $3?;
+		expr.validate();
+		if expr.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
+			exit_on_err(
+				"Invalid expression type used to index".to_owned()
+					+ var.as_str() 
+					+ "[x]",
+			);
+		}
         let mut ind : Vec<Box<ASTNode>> = Vec::default();
         ind.push(Box::new(expr));
 		Ok(ASTNode::VAR{
@@ -810,6 +751,22 @@ Variable -> Result<ASTNode, ()>:
 		let i = $3?;
 		let j = $6?;
         let mut ind : Vec<Box<ASTNode>> = Vec::default();
+		i.validate();
+		if i.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
+			exit_on_err(
+				"Invalid expression type used to index".to_owned()
+					+ var.as_str() 
+					+ "[x]",
+			);
+		}
+		j.validate();
+		if j.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
+			exit_on_err(
+				"Invalid expression type used to index".to_owned()
+					+ var.as_str() 
+					+ "[][x]",
+			);
+		}
         ind.push(Box::new(i));
         ind.push(Box::new(j));
 		Ok(ASTNode::VAR{
@@ -823,11 +780,7 @@ VariableExpr -> Result<ASTNode,()>:
 	Variable
 	{
 		let node = $1?;
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Variable not defined or out of scope".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| '&' Variable
@@ -837,11 +790,7 @@ VariableExpr -> Result<ASTNode,()>:
 			op: ASTNodeType::Ref,
 			ptr: Box::new(var),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected an Integer or String type for reference operator".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	| '*' Variable
@@ -851,11 +800,7 @@ VariableExpr -> Result<ASTNode,()>:
 			op: ASTNodeType::Ref,
 			ptr: Box::new(var),
 		};
-		if validate_ast_node(&node) == Ok(false) {
-			return Ok(ASTNode::ErrorNode{
-                err : ASTError::TypeError("Expected an IntegerReference or StringReference type for dereference operator".to_owned()),
-            });
-		}
+		node.validate();
 		Ok(node)
 	}
 	;

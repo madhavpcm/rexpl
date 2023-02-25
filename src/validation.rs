@@ -1,222 +1,372 @@
 use crate::codegen::*;
 use crate::parserlib::*;
 use std::collections::LinkedList;
-pub fn getexprtype(node: &ASTNode) -> Option<ASTExprType> {
-    match node {
-        ASTNode::ErrorNode { err } => match err {
-            ASTError::TypeError(s) => {
-                exit_on_err(s.to_owned());
-                Some(ASTExprType::Null)
-            }
-        },
-        ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
-        ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
-        ASTNode::VAR { name, indices: _ } => getvartype(name),
-        ASTNode::UnaryNode { op, ptr } => match op {
-            ASTNodeType::Deref => getexprtype(ptr),
-            ASTNodeType::Ref => getexprtype(ptr),
-            _ => Some(ASTExprType::Null),
-        },
-        ASTNode::BinaryNode {
-            op,
-            mut exprtype,
-            lhs,
-            rhs,
-        } => match op {
-            ASTNodeType::Gt => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
 
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Bool,
-                        (ASTExprType::IntRef, ASTExprType::IntRef) => ASTExprType::Bool,
-                        (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap())
+pub fn getvartype(name: &String) -> Option<ASTExprType> {
+    let lst = LOCALSYMBOLTABLE.lock().unwrap();
+    if let Some(LSymbol::Var {
+        vartype,
+        varid: _,
+        varindices: _,
+    }) = lst.get(name)
+    {
+        return Some(*vartype);
+    }
+    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+    if let Some(GSymbol::Var {
+        vartype,
+        varid: _,
+        varindices: _,
+    }) = gst.get(name)
+    {
+        return Some(*vartype);
+    }
+    None
+}
+impl ASTNode {
+    pub fn validate(self) -> Result<(), String> {
+        //while
+        match self {
+            ASTNode::VAR { name, indices: _ } => varinscope(&name),
+            ASTNode::INT(_) => Ok(()),
+            ASTNode::STR(_) => Ok(()),
+            ASTNode::BreakNode => {
+                let w = WHILE_TRACKER.lock().unwrap();
+                if w.len() < 2 {
+                    return Err("Break statement must be used inside a while loop.".to_owned());
+                }
+                Ok(())
+            }
+            ASTNode::ContinueNode => {
+                let w = WHILE_TRACKER.lock().unwrap();
+                if w.len() < 2 {
+                    return Err("Continue statement must be used inside a while loop.".to_owned());
+                }
+                Ok(())
+            }
+            ASTNode::WhileNode { expr, xdo: _ } => {
+                if expr.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Bool)) {
+                    return Err("Invalid expression inside while's condition.".to_owned());
+                }
+                Ok(())
+            }
+            ASTNode::IfNode { expr, xif: _ } => {
+                if expr.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Bool)) {
+                    return Err("Invalid expression inside if's condition.".to_owned());
+                }
+                Ok(())
+            }
+            ASTNode::IfElseNode {
+                expr,
+                xif: _,
+                xelse: _,
+            } => {
+                if expr.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Bool)) {
+                    return Err("Invalid expression inside if else's condition.".to_owned());
+                }
+                Ok(())
+            }
+            ASTNode::ReturnNode { expr } => {
+                let ct = CURR_TYPE.lock().unwrap();
+                if expr.getexprtype() != Some(*ct) {
+                    return Err("Invalid expression inside if else's condition.".to_owned());
+                }
+                Ok(())
+            }
+            ASTNode::UnaryNode { op, ptr } => match op {
+                ASTNodeType::Ref => {
+                    let var = &*ptr;
+                    match var {
+                            ASTNode::VAR { name, indices: _ } => {
+                                varinscope(&name);
+                                let vartype = getvartype(&name).unwrap();
+                                match vartype {
+                                    ASTExprType::Primitive(PrimitiveType::Int) => Ok(()),
+                                    ASTExprType::Primitive(PrimitiveType::String) => Ok(()),
+                                    _ => Err("Reference operator got a variable of invalid type"
+                                        .to_owned()),
+                                }
+                            }
+                            _ => Err(
+                                "Reference operator expects a declared variable of Primitive Type or User Defined Type."
+                                    .to_owned(),
+                            ),
+                        }
+                }
+                ASTNodeType::Deref => {
+                    let var = &*ptr;
+                    match var {
+                        ASTNode::VAR { name, indices: _ } => {
+                            varinscope(name);
+                            let vartype = getvartype(&name).unwrap();
+                            match vartype {
+                                ASTExprType::Pointer(_) => Ok(()),
+                                _ => Err("Dereference operator expects a variable with pointer data type.".to_owned()),
+                            }
+                        }
+                        _ => Err("Dereference operator expects a variable".to_owned()),
+                    }
+                }
+                ASTNodeType::Write => {
+                    let expr = &*ptr;
+                    match expr {
+                        ASTNode::BinaryNode {
+                            op: _,
+                            exprtype,
+                            lhs: _,
+                            rhs: _,
+                        } => match exprtype {
+                            Some(ASTExprType::Primitive(PrimitiveType::Bool)) => {
+                                Err("Write statement expects a str or int type.".to_owned())
+                            }
+                            Some(ASTExprType::Primitive(PrimitiveType::Void)) => {
+                                Err("Write statement expects a str or int type.".to_owned())
+                            }
+                            Some(ASTExprType::Primitive(PrimitiveType::Null)) => {
+                                Err("Write statement expects a str or int type.".to_owned())
+                            }
+                            Some(ASTExprType::Pointer(p)) => {
+                                log::warn!("Writing a pointer!");
+                                Ok(())
+                            }
+                            _ => Ok(()),
+                        },
+                        _ => Ok(()),
+                    }
+                }
+                _ => Ok(()),
+            },
+            ASTNode::BinaryNode {
+                op,
+                exprtype: _,
+                lhs,
+                rhs,
+            } => match op {
+                ASTNodeType::Equals => {
+                    let lhs_t = lhs.getexprtype();
+                    let rhs_t = rhs.getexprtype();
+
+                    if lhs_t == rhs_t {
+                        Ok(())
+                    } else {
+                        Err("Assignment of invalid type.".to_owned())
+                    }
+                }
+                ASTNodeType::Gt
+                | ASTNodeType::Gte
+                | ASTNodeType::Ne
+                | ASTNodeType::Ee
+                | ASTNodeType::Lt
+                | ASTNodeType::Lte => {
+                    if self.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Bool)) {
+                        Err("Boolean operator got invalid types.".to_owned())
+                    } else {
+                        Ok(())
+                    }
+                }
+                ASTNodeType::Plus
+                | ASTNodeType::Minus
+                | ASTNodeType::Star
+                | ASTNodeType::Slash
+                | ASTNodeType::Mod => {
+                    let expr = self.getexprtype();
+                    if expr != None && expr != Some(ASTExprType::Primitive(PrimitiveType::Null)) {
+                        Ok(())
+                    } else {
+                        Err("Operator +-/*% got invalid types.".to_owned())
+                    }
+                }
+                _ => Ok(()),
+            },
+            ASTNode::FuncCallNode { fname, arglist } => {
+                let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+                let p;
+                if let Some(entry) = gst.get(&fname) {
+                    match entry {
+                        GSymbol::Func {
+                            ret_type: _,
+                            paramlist,
+                            flabel: _,
+                        } => {
+                            p = paramlist.clone();
+                        }
+                        _ => {
+                            return Err("Function name [".to_owned()
+                                + fname.as_str()
+                                + "] is not declared")
+                        }
+                    }
                 } else {
-                    Some(exprtype.unwrap())
+                    return Ok(());
+                }
+                compare_arglist_paramlist(&*arglist, &p)
+            }
+            ASTNode::FuncDefNode {
+                fname,
+                ret_type: r1,
+                body: _,
+                paramlist: a,
+            } => {
+                let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+                if let Some(entry) = gst.get(&fname) {
+                    match entry {
+                        GSymbol::Var {
+                            vartype: _,
+                            varid: _,
+                            varindices: _,
+                        } => Err("Function with name [".to_owned()
+                            + fname.as_str()
+                            + "]is already declared as a variable"),
+                        GSymbol::Func {
+                            ret_type: r2,
+                            paramlist: b,
+                            flabel: _,
+                        } => {
+                            if &r1 != r2 {
+                                return Err("Function [".to_owned()
+                                    + fname.as_str()
+                                    + "]'s return type doesn't match in it declaration");
+                            }
+                            if &a != b {
+                                return Err("Function [".to_owned()
+                                    + fname.as_str()
+                                    + "]'s parameter list doesn't match in it declaration");
+                            }
+                            Ok(())
+                        }
+                    }
+                } else {
+                    Err("Function with name [".to_owned() + fname.as_str() + "] is not declared")
                 }
             }
-            ASTNodeType::Gte => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Bool,
-                        (ASTExprType::IntRef, ASTExprType::IntRef) => ASTExprType::Bool,
-                        (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap())
-                } else {
-                    Some(exprtype.unwrap())
+            _ => Ok(()),
+        }
+    }
+    pub fn getexprtype(self) -> Option<ASTExprType> {
+        match self {
+            ASTNode::ErrorNode { err } => match err {
+                ASTError::TypeError(s) => {
+                    exit_on_err(s.to_owned());
+                    Some(ASTExprType::Primitive(PrimitiveType::Null))
                 }
-            }
-            ASTNodeType::Lt => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Bool,
-                        (ASTExprType::IntRef, ASTExprType::IntRef) => ASTExprType::Bool,
-                        (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap())
-                } else {
-                    Some(exprtype.unwrap())
+            },
+            ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
+            ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
+            ASTNode::VAR { name, indices: _ } => getvartype(&name),
+            ASTNode::UnaryNode { op, ptr } => match op {
+                ASTNodeType::Deref => ptr.getexprtype(),
+                ASTNodeType::Ref => ptr.getexprtype(),
+                _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            },
+            ASTNode::BinaryNode {
+                op,
+                mut exprtype,
+                lhs,
+                rhs,
+            } => match op {
+                ASTNodeType::Gt | ASTNodeType::Lt | ASTNodeType::Gte | ASTNodeType::Lte => {
+                    if exprtype == None {
+                        let lhs_t = lhs.getexprtype()?;
+                        let rhs_t = rhs.getexprtype()?;
+                        exprtype = match (lhs_t, rhs_t) {
+                            (
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            _ => Some(ASTExprType::Error),
+                        };
+                        exprtype.clone()
+                    } else {
+                        exprtype.clone()
+                    }
                 }
-            }
-            ASTNodeType::Lte => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
+                ASTNodeType::Ee | ASTNodeType::Ne => {
+                    if exprtype == None {
+                        let lhs_t = lhs.getexprtype()?;
+                        let rhs_t = rhs.getexprtype()?;
 
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Bool,
-                        (ASTExprType::IntRef, ASTExprType::IntRef) => ASTExprType::Bool,
-                        (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap())
-                } else {
-                    Some(exprtype.unwrap())
+                        exprtype = match (lhs_t, rhs_t) {
+                            (
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (ASTExprType::Pointer(ptr1), ASTExprType::Pointer(ptr2)) => {
+                                if ptr1.depth() == ptr2.depth()
+                                    && ptr1.get_base_type() == ptr2.get_base_type()
+                                {
+                                    Some(*ptr1.clone())
+                                } else {
+                                    Some(ASTExprType::Error)
+                                }
+                            }
+                            _ => None,
+                        };
+                        exprtype.clone()
+                    } else {
+                        exprtype.clone()
+                    }
                 }
-            }
-            ASTNodeType::Ne => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
+                ASTNodeType::Mod | ASTNodeType::Star | ASTNodeType::Slash => {
+                    if exprtype == None {
+                        let lhs_t = lhs.getexprtype()?;
+                        let rhs_t = rhs.getexprtype()?;
 
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Bool,
-                        (ASTExprType::IntRef, ASTExprType::IntRef) => ASTExprType::Bool,
-                        (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
-                        (ASTExprType::String, ASTExprType::String) => ASTExprType::Bool,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap())
-                } else {
-                    Some(exprtype.unwrap())
+                        exprtype = match (lhs_t, rhs_t) {
+                            (
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            _ => Some(ASTExprType::Error),
+                        };
+                        exprtype.clone()
+                    } else {
+                        exprtype.clone()
+                    }
                 }
-            }
-            ASTNodeType::Ee => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
+                ASTNodeType::Minus | ASTNodeType::Plus => {
+                    if exprtype == None {
+                        let lhs_t = lhs.getexprtype()?;
+                        let rhs_t = rhs.getexprtype()?;
 
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Bool,
-                        (ASTExprType::IntRef, ASTExprType::IntRef) => ASTExprType::Bool,
-                        (ASTExprType::StringRef, ASTExprType::StringRef) => ASTExprType::Bool,
-                        (ASTExprType::String, ASTExprType::String) => ASTExprType::Bool,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap())
-                } else {
-                    Some(exprtype.unwrap())
+                        exprtype = match (lhs_t, rhs_t) {
+                            (
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
+                            (
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                                ASTExprType::Pointer(p),
+                            ) => Some(*p.clone()),
+                            (
+                                ASTExprType::Pointer(p),
+                                ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(*p.clone()),
+                            _ => Some(ASTExprType::Error),
+                        };
+                        exprtype.clone()
+                    } else {
+                        exprtype.clone()
+                    }
                 }
-            }
-            ASTNodeType::Mod => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap().clone())
+                _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            },
+            ASTNode::FuncCallNode { fname, arglist: _ } => {
+                let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+                if let Some(entry) = gst.get(&fname) {
+                    match entry {
+                        GSymbol::Func {
+                            ret_type,
+                            paramlist: _,
+                            flabel: _,
+                        } => Some(ret_type.clone()),
+                        _ => None,
+                    }
                 } else {
-                    Some(exprtype.unwrap().clone())
-                }
-            }
-            ASTNodeType::Slash => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap().clone())
-                } else {
-                    Some(exprtype.unwrap().clone())
-                }
-            }
-            ASTNodeType::Star => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap().clone())
-                } else {
-                    Some(exprtype.unwrap().clone())
-                }
-            }
-            ASTNodeType::Minus => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
-                        (ASTExprType::Int, ASTExprType::IntRef) => ASTExprType::IntRef,
-                        (ASTExprType::IntRef, ASTExprType::Int) => ASTExprType::IntRef,
-                        (ASTExprType::StringRef, ASTExprType::Int) => ASTExprType::StringRef,
-                        (ASTExprType::Int, ASTExprType::StringRef) => ASTExprType::StringRef,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap().clone())
-                } else {
-                    Some(exprtype.unwrap().clone())
-                }
-            }
-            ASTNodeType::Plus => {
-                if exprtype == None {
-                    let lhs_t = getexprtype(lhs)?;
-                    let rhs_t = getexprtype(rhs)?;
-
-                    exprtype = Some(match (lhs_t, rhs_t) {
-                        (ASTExprType::Int, ASTExprType::Int) => ASTExprType::Int,
-                        (ASTExprType::Int, ASTExprType::IntRef) => ASTExprType::IntRef,
-                        (ASTExprType::IntRef, ASTExprType::Int) => ASTExprType::IntRef,
-                        (ASTExprType::StringRef, ASTExprType::Int) => ASTExprType::StringRef,
-                        (ASTExprType::Int, ASTExprType::StringRef) => ASTExprType::StringRef,
-                        _ => ASTExprType::Null,
-                    });
-                    Some(exprtype.unwrap().clone())
-                } else {
-                    Some(exprtype.unwrap().clone())
+                    None
                 }
             }
             _ => None,
-        },
-        ASTNode::FuncCallNode { fname, arglist: _ } => {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(entry) = gst.get(fname) {
-                match entry {
-                    GSymbol::Func {
-                        ret_type,
-                        paramlist: _,
-                        flabel: _,
-                    } => Some(ret_type.clone()),
-                    _ => None,
-                }
-            } else {
-                None
-            }
         }
-        _ => None,
     }
 }
 pub fn getvarindices(name: &String) -> Option<Vec<usize>> {
@@ -261,31 +411,10 @@ pub fn getvarid(name: &String) -> Option<i64> {
     }
     None
 }
-pub fn getvartype(name: &String) -> Option<ASTExprType> {
-    let lst = LOCALSYMBOLTABLE.lock().unwrap();
-    if let Some(LSymbol::Var {
-        vartype,
-        varid: _,
-        varindices: _,
-    }) = lst.get(name)
-    {
-        return Some(*vartype);
-    }
-    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-    if let Some(GSymbol::Var {
-        vartype,
-        varid: _,
-        varindices: _,
-    }) = gst.get(name)
-    {
-        return Some(*vartype);
-    }
-    None
-}
-pub fn varinscope(name: &String) -> Result<bool, ()> {
+pub fn varinscope(name: &String) -> Result<(), String> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if lst.contains_key(name) {
-        Ok(true)
+        Ok(())
     } else {
         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
         if let Some(entry) = gst.get(name) {
@@ -294,287 +423,16 @@ pub fn varinscope(name: &String) -> Result<bool, ()> {
                     vartype: _,
                     varid: _,
                     varindices: _,
-                } => Ok(true),
+                } => Ok(()),
                 GSymbol::Func {
                     ret_type: _,
                     paramlist: _,
                     flabel: _,
-                } => Ok(false),
+                } => Err("Symbol [".to_owned() + name.as_str() + "] declared as a function."),
             }
         } else {
-            Ok(false)
+            Err("Symbol [".to_owned() + name.as_str() + "] is not declared.")
         }
-    }
-}
-pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
-    //while
-    match node {
-        ASTNode::VAR { name, indices: _ } => varinscope(name),
-        ASTNode::INT(_) => Ok(true),
-        ASTNode::STR(_) => Ok(true),
-        ASTNode::BreakNode => {
-            let w = WHILE_TRACKER.lock().unwrap();
-            if w.len() > 1 {
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        }
-        ASTNode::ContinueNode => {
-            let w = WHILE_TRACKER.lock().unwrap();
-            if w.len() > 1 {
-                Ok(true)
-            } else {
-                Ok(false)
-            }
-        }
-        ASTNode::DeclNode {
-            var_type: _,
-            list: _,
-        } => Ok(true),
-        ASTNode::WhileNode { expr, xdo: _ } => {
-            if getexprtype(&expr) != Some(ASTExprType::Bool) {
-                exit_on_err("Invalid Expression inside while".to_owned())
-            }
-            Ok(true)
-        }
-        ASTNode::IfNode { expr, xif: _ } => {
-            if getexprtype(&expr) != Some(ASTExprType::Bool) {
-                exit_on_err("Invalid Expression inside if".to_owned());
-            }
-            Ok(true)
-        }
-        ASTNode::IfElseNode {
-            expr,
-            xif: _,
-            xelse: _,
-        } => {
-            if getexprtype(&expr) != Some(ASTExprType::Bool) {
-                exit_on_err("Invalid Expression inside ifelse".to_owned());
-            }
-            Ok(true)
-        }
-        ASTNode::ReturnNode { expr } => {
-            let ct = CURR_TYPE.lock().unwrap();
-
-            if getexprtype(expr).unwrap() != *ct {
-                Ok(false)
-            } else {
-                Ok(true)
-            }
-        }
-        ASTNode::UnaryNode { op, ptr } => match op {
-            ASTNodeType::Ref => {
-                let var = &**ptr;
-                match var {
-                    ASTNode::VAR { name, indices: _ } => {
-                        if varinscope(&name) == Ok(false) {
-                            Ok(false)
-                        } else {
-                            let vartype = getvartype(&name).unwrap();
-                            if vartype == ASTExprType::Int || vartype == ASTExprType::String {
-                                Ok(true)
-                            } else {
-                                Ok(false)
-                            }
-                        }
-                    }
-                    _ => Ok(false),
-                }
-            }
-            ASTNodeType::Deref => {
-                let var = &**ptr;
-                match var {
-                    ASTNode::VAR { name, indices: _ } => {
-                        if varinscope(&name) == Ok(false) {
-                            Ok(false)
-                        } else {
-                            let vartype = getvartype(&name).unwrap();
-                            if vartype == ASTExprType::IntRef || vartype == ASTExprType::StringRef {
-                                Ok(true)
-                            } else {
-                                Ok(false)
-                            }
-                        }
-                    }
-                    _ => Ok(false),
-                }
-            }
-            ASTNodeType::Write => {
-                let expr = &**ptr;
-                match expr {
-                    ASTNode::BinaryNode {
-                        op: _,
-                        exprtype,
-                        lhs: _,
-                        rhs: _,
-                    } => match exprtype {
-                        Some(ASTExprType::Bool) => Ok(false),
-                        _ => Ok(true),
-                    },
-                    _ => Ok(true),
-                }
-            }
-            _ => Ok(true),
-        },
-        ASTNode::BinaryNode {
-            op,
-            exprtype: _,
-            lhs,
-            rhs,
-        } => match op {
-            ASTNodeType::Equals => {
-                let lhs_t = getexprtype(lhs);
-                let rhs_t = getexprtype(rhs);
-
-                if lhs_t == rhs_t {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            ASTNodeType::Gt => {
-                if getexprtype(node) != Some(ASTExprType::Bool) {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            ASTNodeType::Gte => {
-                if getexprtype(node) != Some(ASTExprType::Bool) {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            ASTNodeType::Lt => {
-                if getexprtype(node) != Some(ASTExprType::Bool) {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            ASTNodeType::Lte => {
-                if getexprtype(node) != Some(ASTExprType::Bool) {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            ASTNodeType::Ee => {
-                if getexprtype(node) != Some(ASTExprType::Bool) {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            ASTNodeType::Ne => {
-                if getexprtype(node) != Some(ASTExprType::Bool) {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-            ASTNodeType::Plus => {
-                if getexprtype(node) != None {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            ASTNodeType::Minus => {
-                if getexprtype(node) != None {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            ASTNodeType::Star => {
-                if getexprtype(node) != None {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            ASTNodeType::Slash => {
-                if getexprtype(node) != None {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            ASTNodeType::Mod => {
-                if getexprtype(node) != None {
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
-            }
-            _ => Ok(false),
-        },
-        ASTNode::FuncCallNode { fname, arglist } => {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            let p;
-            if let Some(entry) = gst.get(fname) {
-                match entry {
-                    GSymbol::Func {
-                        ret_type: _,
-                        paramlist,
-                        flabel: _,
-                    } => {
-                        p = paramlist.clone();
-                    }
-                    _ => return Ok(false),
-                }
-            } else {
-                return Ok(false);
-            }
-            std::mem::drop(gst);
-            Ok(compare_arglist_paramlist(arglist, &p))
-        }
-        ASTNode::FuncDeclNode {
-            fname,
-            ret_type: _,
-            paramlist: _,
-        } => {
-            if fname.as_str() == "main" {
-                exit_on_err("`main` cannot be redeclared".to_owned());
-                Ok(false)
-            } else {
-                let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-                if gst.contains_key(fname) == true {
-                    Ok(false)
-                } else {
-                    Ok(true)
-                }
-            }
-        }
-        ASTNode::FuncDefNode {
-            fname,
-            ret_type: r1,
-            paramlist: a,
-            decl: _,
-            body: _,
-        } => {
-            let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-            if let Some(entry) = gst.get(fname) {
-                match entry {
-                    GSymbol::Var {
-                        vartype: _,
-                        varid: _,
-                        varindices: _,
-                    } => Ok(false),
-                    GSymbol::Func {
-                        ret_type: r2,
-                        paramlist: b,
-                        flabel: _,
-                    } => Ok((&**a == b) && (r1 == r2)),
-                }
-            } else {
-                Ok(false)
-            }
-        }
-        _ => Ok(true),
     }
 }
 /*
@@ -583,19 +441,27 @@ pub fn validate_ast_node(node: &ASTNode) -> Result<bool, ()> {
 fn compare_arglist_paramlist(
     arglist: &LinkedList<ASTNode>,
     paramlist: &LinkedList<VarNode>,
-) -> bool {
+) -> Result<(), String> {
     if arglist.len() != paramlist.len() {
-        return false;
+        return Err(
+            "Function call arguments and declaration arguments dont match in length.".to_owned(),
+        );
     }
     let mut aiter = arglist.iter();
     let mut piter = paramlist.iter();
 
+    let mut ctr = 1;
     while let (Some(arg), Some(param)) = (aiter.next(), piter.next()) {
-        if getexprtype(arg).unwrap() != param.vartype {
-            return false;
+        if arg.getexprtype().unwrap() != param.vartype {
+            return Err(
+                "Function call arguments and declaration arguments dont match in type at ["
+                    .to_owned()
+                    + ctr.to_string().as_str()
+                    + "] position.",
+            );
         }
     }
-    true
+    Ok(())
 }
 //Gets the label of a function
 pub fn get_function_label(fname: &String) -> usize {
@@ -611,42 +477,5 @@ pub fn get_function_label(fname: &String) -> usize {
         };
     } else {
         LABEL_NOT_FOUND
-    }
-}
-/*
- * Validates if a variable is in scope
- */
-pub fn validate_locality(vname: String) {
-    let lst = LOCALSYMBOLTABLE.lock().unwrap();
-    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-    if let Some(entry) = gst.get(&vname) {
-        match entry {
-            GSymbol::Func {
-                ret_type: _,
-                paramlist: _,
-                flabel: _,
-            } => {
-                //exit if a function with similar name exists
-                exit_on_err(
-                    "Parameter Symbol ".to_owned()
-                        + vname.as_str()
-                        + " is already declared as a function",
-                );
-            }
-            GSymbol::Var {
-                vartype: _,
-                varid: _,
-                varindices: _,
-            } => {
-                //Shadow global variable after warning user
-                log::warn!(
-                    "Parameter Symbol {} is already declared as a variable in global scope",
-                    vname
-                );
-            }
-        }
-    }
-    if lst.contains_key(&vname) == true {
-        exit_on_err("Parameter Symbol ".to_owned() + vname.as_str() + " is already declared ");
     }
 }
