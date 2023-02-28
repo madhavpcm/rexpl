@@ -1,0 +1,72 @@
+decl
+	str foo(int b, int c, int d);
+	int b;
+	int c;
+	int d;
+	int bar();
+enddecl
+
+int bar() {
+	decl
+	enddecl
+	begin
+		return 0;
+	end
+}
+str foo(int b, int c, int d) {
+	decl
+		int max;
+	enddecl
+	begin
+		write(b);
+		write(c);
+		write(d);
+
+		return 0;
+	end
+}
+int main(){
+	decl
+		int a,max,x;
+		str q;
+	enddecl
+	begin
+		read(a);
+		read(b);
+		read(c);
+		read(d);
+
+		if(a >b) then
+			if( a > c) then
+				if(a > d) then
+					max = a;
+				else
+					max =d;
+				endif;
+			else
+				if(c > d) then
+					max = c;
+				else
+					max = d;
+				endif;
+			endif;
+		else
+			if( b> c) then
+				if(b > d) then
+					max = b;
+				else
+					max = d;
+				endif;
+			else
+				if(c >d) then
+					max =c;
+				else
+					max = d;
+				endif;
+			endif;
+		endif;
+		q= foo(b,c,d);
+		write(max);
+		a = bar();
+	end
+}

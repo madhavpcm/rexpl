@@ -70,6 +70,10 @@ fn main() {
     }
     if let Some(Ok(r)) = expr_res {
         codegen::code_gen(&r, filename.to_owned() + ".o");
+    } else {
+        if let Some(Err(e)) = expr_res {
+            log::error!("{}", e);
+        }
     }
     linker::linker(filename).expect("Linking failed");
 

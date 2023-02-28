@@ -44,11 +44,11 @@ fn __get_function_storage(fname: &String) -> i64 {
     let mut max_size = 0;
     if let Some(entry) = ft.get(fname) {
         for (
-            k,
+            _k,
             LSymbol::Var {
-                vartype,
+                vartype: _,
                 varid,
-                varindices,
+                varindices: _,
             },
         ) in entry.iter()
         {

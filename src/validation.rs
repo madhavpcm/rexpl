@@ -10,7 +10,7 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
         varindices: _,
     }) = lst.get(name)
     {
-        return Some(*vartype);
+        return Some(vartype.clone());
     }
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
@@ -19,12 +19,12 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
         varindices: _,
     }) = gst.get(name)
     {
-        return Some(*vartype);
+        return Some(vartype.clone());
     }
     None
 }
 impl ASTNode {
-    pub fn validate(self) -> Result<(), String> {
+    pub fn validate(&mut self) -> Result<(), String> {
         //while
         match self {
             ASTNode::VAR { name, indices: _ } => varinscope(&name),
@@ -68,17 +68,17 @@ impl ASTNode {
             }
             ASTNode::ReturnNode { expr } => {
                 let ct = CURR_TYPE.lock().unwrap();
-                if expr.getexprtype() != Some(*ct) {
+                if expr.getexprtype() != Some((*ct).clone()) {
                     return Err("Invalid expression inside if else's condition.".to_owned());
                 }
                 Ok(())
             }
             ASTNode::UnaryNode { op, ptr } => match op {
                 ASTNodeType::Ref => {
-                    let var = &*ptr;
+                    let var = &**ptr;
                     match var {
                             ASTNode::VAR { name, indices: _ } => {
-                                varinscope(&name);
+                                varinscope(&name)?;
                                 let vartype = getvartype(&name).unwrap();
                                 match vartype {
                                     ASTExprType::Primitive(PrimitiveType::Int) => Ok(()),
@@ -94,10 +94,10 @@ impl ASTNode {
                         }
                 }
                 ASTNodeType::Deref => {
-                    let var = &*ptr;
+                    let var = &**ptr;
                     match var {
                         ASTNode::VAR { name, indices: _ } => {
-                            varinscope(name);
+                            varinscope(name)?;
                             let vartype = getvartype(&name).unwrap();
                             match vartype {
                                 ASTExprType::Pointer(_) => Ok(()),
@@ -108,7 +108,7 @@ impl ASTNode {
                     }
                 }
                 ASTNodeType::Write => {
-                    let expr = &*ptr;
+                    let expr = &**ptr;
                     match expr {
                         ASTNode::BinaryNode {
                             op: _,
@@ -125,7 +125,7 @@ impl ASTNode {
                             Some(ASTExprType::Primitive(PrimitiveType::Null)) => {
                                 Err("Write statement expects a str or int type.".to_owned())
                             }
-                            Some(ASTExprType::Pointer(p)) => {
+                            Some(ASTExprType::Pointer(_)) => {
                                 log::warn!("Writing a pointer!");
                                 Ok(())
                             }
@@ -180,8 +180,8 @@ impl ASTNode {
             },
             ASTNode::FuncCallNode { fname, arglist } => {
                 let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-                let p;
-                if let Some(entry) = gst.get(&fname) {
+                let mut p;
+                if let Some(entry) = gst.get(fname) {
                     match entry {
                         GSymbol::Func {
                             ret_type: _,
@@ -199,7 +199,7 @@ impl ASTNode {
                 } else {
                     return Ok(());
                 }
-                compare_arglist_paramlist(&*arglist, &p)
+                compare_arglist_paramlist(arglist, &mut p)
             }
             ASTNode::FuncDefNode {
                 fname,
@@ -208,7 +208,7 @@ impl ASTNode {
                 paramlist: a,
             } => {
                 let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-                if let Some(entry) = gst.get(&fname) {
+                if let Some(entry) = gst.get(&fname.clone()) {
                     match entry {
                         GSymbol::Var {
                             vartype: _,
@@ -222,12 +222,12 @@ impl ASTNode {
                             paramlist: b,
                             flabel: _,
                         } => {
-                            if &r1 != r2 {
+                            if r1 != r2 {
                                 return Err("Function [".to_owned()
                                     + fname.as_str()
                                     + "]'s return type doesn't match in it declaration");
                             }
-                            if &a != b {
+                            if a != b {
                                 return Err("Function [".to_owned()
                                     + fname.as_str()
                                     + "]'s parameter list doesn't match in it declaration");
@@ -242,7 +242,7 @@ impl ASTNode {
             _ => Ok(()),
         }
     }
-    pub fn getexprtype(self) -> Option<ASTExprType> {
+    pub fn getexprtype(&mut self) -> Option<ASTExprType> {
         match self {
             ASTNode::ErrorNode { err } => match err {
                 ASTError::TypeError(s) => {
@@ -260,15 +260,15 @@ impl ASTNode {
             },
             ASTNode::BinaryNode {
                 op,
-                mut exprtype,
+                exprtype,
                 lhs,
                 rhs,
             } => match op {
                 ASTNodeType::Gt | ASTNodeType::Lt | ASTNodeType::Gte | ASTNodeType::Lte => {
-                    if exprtype == None {
+                    if *exprtype == None {
                         let lhs_t = lhs.getexprtype()?;
                         let rhs_t = rhs.getexprtype()?;
-                        exprtype = match (lhs_t, rhs_t) {
+                        *exprtype = match (lhs_t, rhs_t) {
                             (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
@@ -281,11 +281,11 @@ impl ASTNode {
                     }
                 }
                 ASTNodeType::Ee | ASTNodeType::Ne => {
-                    if exprtype == None {
+                    if *exprtype == None {
                         let lhs_t = lhs.getexprtype()?;
                         let rhs_t = rhs.getexprtype()?;
 
-                        exprtype = match (lhs_t, rhs_t) {
+                        *exprtype = match (lhs_t, rhs_t) {
                             (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
@@ -301,34 +301,34 @@ impl ASTNode {
                             }
                             _ => None,
                         };
-                        exprtype.clone()
+                        exprtype.as_ref().cloned()
                     } else {
-                        exprtype.clone()
+                        exprtype.as_ref().cloned()
                     }
                 }
                 ASTNodeType::Mod | ASTNodeType::Star | ASTNodeType::Slash => {
-                    if exprtype == None {
+                    if *exprtype == None {
                         let lhs_t = lhs.getexprtype()?;
                         let rhs_t = rhs.getexprtype()?;
 
-                        exprtype = match (lhs_t, rhs_t) {
+                        *exprtype = match (lhs_t, rhs_t) {
                             (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
                             ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
                             _ => Some(ASTExprType::Error),
                         };
-                        exprtype.clone()
+                        exprtype.as_ref().cloned()
                     } else {
-                        exprtype.clone()
+                        exprtype.as_ref().cloned()
                     }
                 }
                 ASTNodeType::Minus | ASTNodeType::Plus => {
-                    if exprtype == None {
+                    if *exprtype == None {
                         let lhs_t = lhs.getexprtype()?;
                         let rhs_t = rhs.getexprtype()?;
 
-                        exprtype = match (lhs_t, rhs_t) {
+                        *exprtype = match (lhs_t, rhs_t) {
                             (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
@@ -352,7 +352,7 @@ impl ASTNode {
             },
             ASTNode::FuncCallNode { fname, arglist: _ } => {
                 let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-                if let Some(entry) = gst.get(&fname) {
+                if let Some(entry) = gst.get(&fname.clone()) {
                     match entry {
                         GSymbol::Func {
                             ret_type,
@@ -439,16 +439,16 @@ pub fn varinscope(name: &String) -> Result<(), String> {
  * Function to validate the pamalist in declaration to definition
  */
 fn compare_arglist_paramlist(
-    arglist: &LinkedList<ASTNode>,
-    paramlist: &LinkedList<VarNode>,
+    arglist: &mut LinkedList<ASTNode>,
+    paramlist: &mut LinkedList<VarNode>,
 ) -> Result<(), String> {
     if arglist.len() != paramlist.len() {
         return Err(
             "Function call arguments and declaration arguments dont match in length.".to_owned(),
         );
     }
-    let mut aiter = arglist.iter();
-    let mut piter = paramlist.iter();
+    let mut aiter = arglist.iter_mut();
+    let mut piter = paramlist.iter_mut();
 
     let mut ctr = 1;
     while let (Some(arg), Some(param)) = (aiter.next(), piter.next()) {
@@ -460,6 +460,7 @@ fn compare_arglist_paramlist(
                     + "] position.",
             );
         }
+        ctr = ctr + 1;
     }
     Ok(())
 }

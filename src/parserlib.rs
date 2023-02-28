@@ -110,7 +110,7 @@ impl ASTExprType {
             ASTExprType::Pointer(b) => {
                 b.set_base_type(p);
             }
-            ASTError => {}
+            ASTExprType::Error => {}
         }
     }
     pub fn get_base_type(&self) -> PrimitiveType {
@@ -147,7 +147,7 @@ pub struct VarNode {
     pub varindices: Vec<usize>,
 }
 impl VarNode {
-    pub fn validate_locality(self) {
+    pub fn validate_locality(&mut self) {
         let lst = LOCALSYMBOLTABLE.lock().unwrap();
         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
         if let Some(entry) = gst.get(&self.varname) {
@@ -183,14 +183,14 @@ impl VarNode {
             );
         }
     }
-    pub fn install_to_lst(self) {
+    pub fn install_to_lst(&mut self) {
         //check if this is already used
         Self::validate_locality(self);
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         let mut varid = LOCALVARID.lock().unwrap();
 
         lst.insert(
-            self.varname,
+            self.varname.clone(),
             LSymbol::Var {
                 vartype: (self.vartype.clone()),
                 varid: (varid.clone()),
@@ -234,7 +234,6 @@ pub fn install_func_to_gst(
     paramlist: &LinkedList<VarNode>,
 ) {
     let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
-    let mut varid = VARID.lock().unwrap();
     let mut label_count = LABEL_COUNT.lock().unwrap();
     //check if this is already  used
     if gst.contains_key(funcname.as_str()) {
@@ -377,16 +376,16 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
 /*
  * Function to insert parameter list to local symbol table
  */
-pub fn __lst_install_params(paramlist: &LinkedList<VarNode>) {
+pub fn __lst_install_params(paramlist: &mut LinkedList<VarNode>) {
     //Check if this variable is in Global Symbol Table
     let mut localid = -3;
-    for param in paramlist {
+    for param in paramlist.iter_mut() {
         param.validate_locality();
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         lst.insert(
             param.varname.clone(),
             LSymbol::Var {
-                vartype: (param.vartype),
+                vartype: (param.vartype.clone()),
                 varid: (localid),
                 varindices: (param.varindices.clone()),
             },
