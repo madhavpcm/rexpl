@@ -16,7 +16,7 @@ lazy_static! {
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
     pub static ref LOCALSYMBOLTABLE: Mutex<HashMap<String, LSymbol>> =
         Mutex::new(HashMap::default());
-    pub static ref CURR_TYPE: Mutex<ASTExprType> =
+    pub static ref RET_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
     pub static ref DECL_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
@@ -88,6 +88,15 @@ impl std::fmt::Display for PrimitiveType {
             _ => {
                 write!(f, "null_t")
             }
+        }
+    }
+}
+impl std::fmt::Display for ASTExprType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            ASTExprType::Error => write!(f, "ASTExprType :: Error"),
+            ASTExprType::Primitive(p) => write!(f, "{}", p),
+            ASTExprType::Pointer(p) => write!(f, "{}{}", "*".repeat(p.depth()), p.get_base_type()),
         }
     }
 }
@@ -209,7 +218,7 @@ impl VarNode {
         //check if this is already  used
         if gst.contains_key(self.varname.as_str()) {
             exit_on_err(
-                "Global symbol + ".to_owned() + self.varname.as_str() + " is already declared.",
+                "Global symbol [".to_owned() + self.varname.as_str() + "] is already declared.",
             )
         }
         gst.insert(

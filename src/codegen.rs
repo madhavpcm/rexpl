@@ -733,9 +733,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = (fname.clone(), __get_function_storage(fname));
                 std::mem::drop(ft);
                 std::mem::drop(lst);
+                *fs = (fname.clone(), __get_function_storage(fname));
                 std::mem::drop(fs);
 
                 __code_gen(&**body, file, false);

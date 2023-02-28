@@ -52,6 +52,38 @@ Type -> Result<ASTExprType,String>:
 		Ok(ASTExprType::Primitive(PrimitiveType::String))
 	}
     ;
+ParamType -> Result<ASTExprType,String>: 
+	Type
+	{
+		let t = $1?;
+		Ok(t)
+	}
+	| Type PtrPtr
+	{
+		let mut ptr = $2?;
+		let t = $1?;
+		ptr.set_base_type(t.get_base_type());
+		Ok(ptr)
+	}
+    ;
+FType-> Result<ASTExprType,String>: 
+	Type
+	{
+		let t = $1?;
+		let mut rt = RET_TYPE.lock().unwrap();
+		*rt = t.clone();
+		Ok(t)
+	}
+	| Type PtrPtr
+	{
+		let mut ptr = $2?;
+		let t = $1?;
+		let mut rt = RET_TYPE.lock().unwrap();
+		ptr.set_base_type(t.get_base_type());
+		*rt = ptr.clone();
+		Ok(ptr)
+	}
+    ;
 DeclType -> Result<ASTExprType,String>: 
 	'INT_T'
 	{
@@ -103,9 +135,10 @@ Start -> Result<ASTNode,String>:
     }
 	;
 MainBlock -> Result<ASTNode,String>:
-	DeclType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
+	FType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let body_ = $7?;
+		let type_ = $1?;
 		let node = ASTNode::MainNode{
 			body: Box::new(body_),
 		};
@@ -146,9 +179,10 @@ LDeclList -> ():
 	}
 	;
 GDeclList -> ():
-	GDecl GDeclList 
+	GDecl GDeclList
 	{
 	}
+	| GDecl
 	{
 	}
 	;
@@ -232,7 +266,7 @@ FDefBlock -> Result<ASTNode,String>:
 	}
 	;
 FDef ->Result<ASTNode,String>:
-	DeclType "VAR" '(' ParamListBlock ')' '{' LDeclBlock BeginBlock '}'
+	FType "VAR" '(' ParamListBlock ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| "VAR Err".to_string())?; 
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
@@ -295,7 +329,7 @@ ParamList -> Result<LinkedList<VarNode>,String>:
 	;
 
 Param -> Result<LinkedList<VarNode>,String>:
-	DeclType VariableDef 
+	ParamType VariableDef 
     {
 		let mut var = $2?;
         let vtype = $1?;

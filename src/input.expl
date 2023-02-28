@@ -5,11 +5,20 @@ decl
 	int d;
 enddecl
 
-int main(){
-	decl
+str foo(int b, int c, int d) 
+{
+	decl 
 	enddecl
 	begin
-		int b;
+		return "abc";
+	end
+}
+
+int main(){
+	decl
+		int e;
+	enddecl
+	begin
 		return 0;
 	end
 }

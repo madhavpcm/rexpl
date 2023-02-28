@@ -67,9 +67,10 @@ impl ASTNode {
                 Ok(())
             }
             ASTNode::ReturnNode { expr } => {
-                let ct = CURR_TYPE.lock().unwrap();
-                if expr.getexprtype() != Some((*ct).clone()) {
-                    return Err("Invalid expression inside if else's condition.".to_owned());
+                let ct = RET_TYPE.lock().unwrap().clone();
+                let b = expr.getexprtype();
+                if b != Some(ct) {
+                    return Err("Invalid return type.".to_owned());
                 }
                 Ok(())
             }

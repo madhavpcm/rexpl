@@ -73,6 +73,7 @@ fn main() {
     } else {
         if let Some(Err(e)) = expr_res {
             log::error!("{}", e);
+            process::exit(1);
         }
     }
     linker::linker(filename).expect("Linking failed");
