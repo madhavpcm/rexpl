@@ -111,6 +111,19 @@ pub enum ASTExprType {
 
 impl ASTExprType {
     //Only used by parser
+    pub fn refr(&self) -> Option<ASTExprType> {
+        match self {
+            ASTExprType::Error => None,
+            _ => Some(ASTExprType::Pointer(Box::new(self.clone()))),
+        }
+    }
+    pub fn derefr(&self) -> Option<ASTExprType> {
+        match self {
+            ASTExprType::Primitive(_) => None,
+            ASTExprType::Pointer(p) => Some((**p).clone()),
+            ASTExprType::Error => None,
+        }
+    }
     pub fn set_base_type(&mut self, p: PrimitiveType) {
         match self {
             ASTExprType::Primitive(t) => {
@@ -132,7 +145,7 @@ impl ASTExprType {
     pub fn depth(&self) -> usize {
         match self {
             ASTExprType::Pointer(p) => Self::depth(p) + 1,
-            ASTExprType::Primitive(_) => 1,
+            ASTExprType::Primitive(_) => 0,
             ASTExprType::Error => 0,
         }
     }
@@ -274,7 +287,9 @@ pub enum ASTNode {
     },
     UnaryNode {
         op: ASTNodeType,
+        exprtype: Option<ASTExprType>,
         ptr: Box<ASTNode>,
+        depth: Option<usize>,
     },
     IfNode {
         expr: Box<ASTNode>,

@@ -552,7 +552,12 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             };
             result
         }
-        ASTNode::UnaryNode { op, ptr } => match op {
+        ASTNode::UnaryNode {
+            op,
+            exprtype: _,
+            ptr,
+            depth,
+        } => match op {
             ASTNodeType::Read => {
                 __backup_registers(file);
                 let register = get_reg();
@@ -610,7 +615,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     indices: _,
                 } => {
                     let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
-                    write_line(file, format_args!("MOV R{},[R{}]", regaddr, regaddr));
+                    for _i in 0..depth.unwrap() {
+                        write_line(file, format_args!("MOV R{},[R{}]", regaddr, regaddr));
+                    }
                     return regaddr;
                 }
                 _ => {

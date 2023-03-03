@@ -74,43 +74,36 @@ impl ASTNode {
                 }
                 Ok(())
             }
-            ASTNode::UnaryNode { op, ptr } => match op {
-                ASTNodeType::Ref => {
-                    let var = &**ptr;
-                    match var {
-                            ASTNode::VAR { name, indices: _ } => {
-                                varinscope(&name)?;
-                                let vartype = getvartype(&name).unwrap();
-                                match vartype {
-                                    ASTExprType::Primitive(PrimitiveType::Int) => Ok(()),
-                                    ASTExprType::Primitive(PrimitiveType::String) => Ok(()),
-                                    _ => Err("Reference operator got a variable of invalid type"
-                                        .to_owned()),
-                                }
-                            }
-                            _ => Err(
-                                "Reference operator expects a declared variable of Primitive Type or User Defined Type."
-                                    .to_owned(),
-                            ),
-                        }
-                }
+            ASTNode::UnaryNode {
+                op,
+                exprtype,
+                ptr,
+                depth,
+            } => match op {
                 ASTNodeType::Deref => {
-                    let var = &**ptr;
-                    match var {
-                        ASTNode::VAR { name, indices: _ } => {
-                            varinscope(name)?;
-                            let vartype = getvartype(&name).unwrap();
-                            match vartype {
-                                ASTExprType::Pointer(_) => Ok(()),
-                                _ => Err("Dereference operator expects a variable with pointer data type.".to_owned()),
-                            }
+                    ptr.validate()?;
+
+                    if let Some(ptrtype) = ptr.getexprtype() {
+                        if ptrtype.depth() < depth.unwrap() {
+                            return Err("Dereferencing non pointer type.".to_owned());
                         }
-                        _ => Err("Dereference operator expects a variable".to_owned()),
+                    }
+                    self.getexprtype();
+                    Ok(())
+                }
+                ASTNodeType::Ref => {
+                    ptr.validate()?;
+                    match &**ptr {
+                        ASTNode::VAR { name, indices: _ } => Ok(()),
+                        _ => Err("Reference operator expects a declared variable.".to_owned()),
                     }
                 }
                 ASTNodeType::Write => {
-                    let expr = &**ptr;
-                    match expr {
+                    ptr.validate()?;
+                    match &**ptr {
+                        ASTNode::VAR { name, indices } => Ok(()),
+                        ASTNode::INT(_) => Ok(()),
+                        ASTNode::STR(_) => Ok(()),
                         ASTNode::BinaryNode {
                             op: _,
                             exprtype,
@@ -254,9 +247,36 @@ impl ASTNode {
             ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
             ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
             ASTNode::VAR { name, indices: _ } => getvartype(&name),
-            ASTNode::UnaryNode { op, ptr } => match op {
-                ASTNodeType::Deref => ptr.getexprtype(),
-                ASTNodeType::Ref => ptr.getexprtype(),
+            ASTNode::UnaryNode {
+                op,
+                exprtype,
+                ptr,
+                depth,
+            } => match op {
+                ASTNodeType::Deref => {
+                    if exprtype == &None {
+                        let mut ptrtype = ptr.getexprtype().unwrap();
+                        for _i in 0..depth.unwrap() {
+                            ptrtype = ptrtype.derefr().unwrap();
+                        }
+                        *exprtype = Some(ptrtype);
+                        exprtype.clone()
+                    } else {
+                        exprtype.clone()
+                    }
+                }
+                ASTNodeType::Ref => {
+                    if exprtype == &None {
+                        if let Some(base) = ptr.getexprtype() {
+                            *exprtype = base.refr();
+                            base.refr()
+                        } else {
+                            exprtype.clone()
+                        }
+                    } else {
+                        exprtype.clone()
+                    }
+                }
                 _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
             },
             ASTNode::BinaryNode {

@@ -22,7 +22,6 @@ main "MAIN"
 return "RETURN"
 str "STR_T"
 int "INT_T"
-[*]+ "PTRPTR"
 
 == "=="
 <= "<="

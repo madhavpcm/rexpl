@@ -139,6 +139,9 @@ MainBlock -> Result<ASTNode,String>:
 	{
 		let body_ = $7?;
 		let type_ = $1?;
+		if type_ != ASTExprType::Primitive(PrimitiveType::Int) {
+			return Err("Main should return an integer".to_string());
+		}
 		let node = ASTNode::MainNode{
 			body: Box::new(body_),
 		};
@@ -211,6 +214,16 @@ GItem -> ():
 		let v = $1.map_err(|_| ()).unwrap();
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
 		let paramlist = $3.unwrap();
+		install_func_to_gst(functionname,returntype,&paramlist);
+	}
+	| PtrPtr "VAR" '(' ParamList ')'
+	{
+		let base= DECL_TYPE.lock().unwrap().clone();
+		let mut returntype = $1.unwrap();
+		returntype.set_base_type(base.get_base_type());
+		let v = $2.map_err(|_| ()).unwrap();
+		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
+		let paramlist = $4.unwrap();
 		install_func_to_gst(functionname,returntype,&paramlist);
 	}
 	| VarItem
@@ -483,7 +496,9 @@ OutputStmt -> Result<ASTNode,String>:
 	{
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Write,
+			exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
 			ptr : Box::new($3?),
+			depth : None,
 		})
 	}
 	;
@@ -501,8 +516,9 @@ AssgStmt -> Result<ASTNode,String>:
 		node.validate()?;
 		Ok(node)
 	}
-	| '*' Variable '=' Expr ';'
+	| PtrPtr Variable '=' Expr ';'
 	{
+	//TODO
 		let lhs = $2?;
 		let rhs = $4?;
 		let mut node = ASTNode::BinaryNode{
@@ -510,7 +526,9 @@ AssgStmt -> Result<ASTNode,String>:
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
 			lhs : Box::new(ASTNode::UnaryNode{
 				op: ASTNodeType::Deref,
-				ptr: Box::new(lhs)
+				exprtype: None,
+				ptr: Box::new(lhs),
+				depth: Some($1?.depth()),
 			}),
 			rhs : Box::new(rhs),
 		};
@@ -523,18 +541,24 @@ InputStmt -> Result<ASTNode, String> :
 	{
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Read,
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Null)),
 			ptr : Box::new($3?),
+			depth: None
 		})
 	}
-	| "READ" '(' '*' Variable ')' ';'
+	| "READ" '(' PtrPtr Variable ')' ';'
 	{
 		let var = $4?;
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Read,
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Null)),
 			ptr : Box::new(ASTNode::UnaryNode{
 				op: ASTNodeType::Deref,
+				exprtype: None,
 				ptr: Box::new(var),
+				depth: Some($3?.depth()),
 			}),
+			depth: None,
 		})
 	}
 	;
@@ -801,16 +825,20 @@ VariableExpr -> Result<ASTNode,String>:
 	{
 		let mut node = ASTNode::UnaryNode{
 			op: ASTNodeType::Ref,
+			exprtype: None,
 			ptr: Box::new($2?),
+			depth: None,
 		};
 		node.validate()?;
 		Ok(node)
 	}
-	| '*' Variable
+	| PtrPtr Variable
 	{
 		let mut node = ASTNode::UnaryNode{
-			op: ASTNodeType::Ref,
+			op: ASTNodeType::Deref,
+			exprtype: None,
 			ptr: Box::new($2?),
+			depth: Some($1?.depth()),
 		};
 		node.validate()?;
 		Ok(node)

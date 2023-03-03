@@ -1,24 +1,15 @@
 decl
-	str foo(int b, int c, int d);
-	int b;
-	int c;
-	int d;
+	int foo(int b, int c, int d);
 enddecl
-
-str foo(int b, int c, int d) 
-{
-	decl 
-	enddecl
-	begin
-		return "abc";
-	end
-}
 
 int main(){
 	decl
-		int e;
+		int e[10],i;
+		int *c;
+		int **b;
 	enddecl
 	begin
+		c = e;
 		return 0;
 	end
 }
