@@ -7,19 +7,27 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
     if let Some(LSymbol::Var {
         vartype,
         varid: _,
-        varindices: _,
+        varindices,
     }) = lst.get(name)
     {
-        return Some(vartype.clone());
+        let mut vtype = vartype.clone();
+        for _ in varindices.iter() {
+            vtype = vtype.refr().unwrap();
+        }
+        return Some(vtype);
     }
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
         vartype,
         varid: _,
-        varindices: _,
+        varindices,
     }) = gst.get(name)
     {
-        return Some(vartype.clone());
+        let mut vtype = vartype.clone();
+        for _ in varindices.iter() {
+            vtype = vtype.refr().unwrap();
+        }
+        return Some(vtype);
     }
     None
 }
@@ -27,7 +35,36 @@ impl ASTNode {
     pub fn validate(&mut self) -> Result<(), String> {
         //while
         match self {
-            ASTNode::VAR { name, indices: _ } => varinscope(&name),
+            ASTNode::VAR { name, indices } => {
+                varinscope(&name)?;
+                let dind = getvarindices(&name).unwrap();
+                if indices.len() > dind.len() {
+                    return Err("Index dimension error for variable [".to_owned()
+                        + name.as_str()
+                        + "]");
+                }
+                for ei in 0..indices.len() {
+                    if let Some(ei_type) = indices[ei].getexprtype() {
+                        match ei_type {
+                            ASTExprType::Primitive(PrimitiveType::Int) => {
+                                continue;
+                            }
+                            _ => {
+                                return Err("Invalid type used to index variable [".to_owned()
+                                    + name.as_str()
+                                    + "] at "
+                                    + "[]".repeat(ei).as_str());
+                            }
+                        }
+                    } else {
+                        return Err("Invalid type used to index variable [".to_owned()
+                            + name.as_str()
+                            + "] at "
+                            + "[]".repeat(ei).as_str());
+                    }
+                }
+                Ok(())
+            }
             ASTNode::INT(_) => Ok(()),
             ASTNode::STR(_) => Ok(()),
             ASTNode::BreakNode => {
@@ -94,14 +131,23 @@ impl ASTNode {
                 ASTNodeType::Ref => {
                     ptr.validate()?;
                     match &**ptr {
-                        ASTNode::VAR { name, indices: _ } => Ok(()),
+                        ASTNode::VAR { name, indices } => {
+                            let varindices = getvarindices(name).unwrap();
+                            if indices.len() != varindices.len() {
+                                return Err("Reference operator can only reference to the basetype of an array.".to_owned());
+                            }
+                            Ok(())
+                        }
                         _ => Err("Reference operator expects a declared variable.".to_owned()),
                     }
                 }
                 ASTNodeType::Write => {
                     ptr.validate()?;
                     match &**ptr {
-                        ASTNode::VAR { name, indices } => Ok(()),
+                        ASTNode::VAR {
+                            name: _,
+                            indices: _,
+                        } => Ok(()),
                         ASTNode::INT(_) => Ok(()),
                         ASTNode::STR(_) => Ok(()),
                         ASTNode::BinaryNode {
@@ -246,7 +292,16 @@ impl ASTNode {
             },
             ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
             ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
-            ASTNode::VAR { name, indices: _ } => getvartype(&name),
+            ASTNode::VAR { name, indices } => {
+                if let Some(mut vtype) = getvartype(&name) {
+                    for _ in 0..indices.len() {
+                        vtype = vtype.derefr().unwrap();
+                    }
+                    return Some(vtype);
+                } else {
+                    return None;
+                }
+            }
             ASTNode::UnaryNode {
                 op,
                 exprtype,
@@ -336,7 +391,7 @@ impl ASTNode {
                             (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
-                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
                             _ => Some(ASTExprType::Error),
                         };
                         exprtype.as_ref().cloned()

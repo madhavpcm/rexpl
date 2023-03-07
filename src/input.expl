@@ -4,12 +4,12 @@ enddecl
 
 int main(){
 	decl
-		int e[10],i;
+		int e[10][10],i;
 		int *c;
 		int **b;
 	enddecl
 	begin
-		c = e;
+		c = e[1];
 		return 0;
 	end
 }

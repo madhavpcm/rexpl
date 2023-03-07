@@ -200,14 +200,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         ASTNode::STR(s) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-            write_line(file, format_args!("MOV R{},{}", register, s));
+            write_line(file, format_args!("MOV R{}, {}", register, s));
             registers[register].1 = 0;
             register
         }
         ASTNode::INT(n) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-            write_line(file, format_args!("MOV R{},{}", register, n));
+            write_line(file, format_args!("MOV R{}, {}", register, n));
             registers[register].1 = *n;
             register
         }
@@ -223,111 +223,27 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(registers);
 
             for i in 0..indices.len() {
-                match *indices[i] {
-                    ASTNode::STR(_) => {
-                        exit_on_err(
-                            "str Type cannot be used to index variable [".to_owned() + name + "]",
-                        );
-                    }
-                    ASTNode::INT(num) => {
-                        let offsetreg = get_reg();
-
-                        write_line(file, format_args!("MOV R{},{}", offsetreg, num));
-
-                        if i != indices.len() - 1 {
-                            let indexmulreg = get_reg();
-                            let mut registers = REGISTERS.lock().unwrap();
-
-                            if let Err(e) =
-                                writeln!(file, "MOV R{}, {}", indexmulreg, varindices[i])
-                            {
-                                exit_on_err(e.to_string());
-                            }
-
-                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
-
-                            registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
-
-                            std::mem::drop(registers);
-                            free_reg(indexmulreg);
-                        }
-
-                        let mut registers = REGISTERS.lock().unwrap();
-                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
-                        registers[baseaddrreg].1 += registers[offsetreg].1;
-
-                        std::mem::drop(registers);
-                        free_reg(offsetreg);
-                    }
-                    ASTNode::VAR {
-                        name: _,
-                        indices: _,
-                    } => {
-                        let offsetreg = __code_gen(&*indices[i], file, false);
-
-                        if i != indices.len() - 1 {
-                            let indexmulreg = get_reg();
-                            let mut registers = REGISTERS.lock().unwrap();
-
-                            if let Err(e) =
-                                writeln!(file, "MOV R{}, {}", indexmulreg, varindices[i])
-                            {
-                                exit_on_err(e.to_string());
-                            }
-
-                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
-
-                            registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
-
-                            std::mem::drop(registers);
-                            free_reg(indexmulreg);
-                        }
-                        let mut registers = REGISTERS.lock().unwrap();
-
-                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
-                        registers[baseaddrreg].1 += registers[offsetreg].1;
-
-                        std::mem::drop(registers);
-                        free_reg(offsetreg);
-                    }
-                    //Normal case
-                    ASTNode::BinaryNode {
-                        op: _,
-                        exprtype: _,
-                        lhs: _,
-                        rhs: _,
-                    } => {
-                        let offsetreg = __code_gen(&*indices[i], file, false);
-
-                        if i != indices.len() - 1 {
-                            let indexmulreg = get_reg();
-                            let mut registers = REGISTERS.lock().unwrap();
-
-                            if let Err(e) =
-                                writeln!(file, "MOV R{}, {}", indexmulreg, varindices[i])
-                            {
-                                exit_on_err(e.to_string());
-                            }
-
-                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
-
-                            registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
-
-                            std::mem::drop(registers);
-                            free_reg(indexmulreg);
-                        }
-
-                        let mut registers = REGISTERS.lock().unwrap();
-                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
-                        registers[baseaddrreg].1 += registers[offsetreg].1;
-
-                        std::mem::drop(registers);
-                        free_reg(offsetreg);
-                    }
-                    _ => exit_on_err("Invalid token as index".to_string()),
-                };
+                //Generate code for first index
+                let offsetreg = __code_gen(&*indices[i], file, false);
+                //Multiple unless its the last index
+                //varindices because we need to handle a[2][2] with a[1] access as pointer
+                if i != varindices.len() - 1 {
+                    //Get register for multiplication
+                    let indexmulreg = get_reg();
+                    //Multiply with the corresponding declared index
+                    write_line(file, format_args!("MUL R{}, {}", offsetreg, varindices[i]));
+                    //free this for reuse
+                    free_reg(indexmulreg);
+                }
+                //Add the offset
+                let mut registers = REGISTERS.lock().unwrap();
+                write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
+                registers[baseaddrreg].1 += registers[offsetreg].1;
+                std::mem::drop(registers);
+                //Free this for reuse
+                free_reg(offsetreg);
             }
-            if refr == false {
+            if refr == false && varindices.len() == indices.len() {
                 write_line(
                     file,
                     format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
@@ -535,7 +451,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
                     write_line(
                         file,
-                        format_args!("MOV [R{}],R{}", left_register, right_register),
+                        format_args!("MOV [R{}], R{}", left_register, right_register),
                     );
                     free_reg(left_register);
                     free_reg(right_register);
