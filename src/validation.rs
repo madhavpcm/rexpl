@@ -1,6 +1,7 @@
 use crate::codegen::*;
 use crate::parserlib::*;
 use std::collections::LinkedList;
+use std::fmt::Pointer;
 
 pub fn getvartype(name: &String) -> Option<ASTExprType> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -105,6 +106,7 @@ impl ASTNode {
             }
             ASTNode::ReturnNode { expr } => {
                 let ct = RET_TYPE.lock().unwrap().clone();
+                expr.validate()?;
                 let b = expr.getexprtype();
                 if b != Some(ct) {
                     return Err("Invalid return type.".to_owned());
@@ -113,7 +115,7 @@ impl ASTNode {
             }
             ASTNode::UnaryNode {
                 op,
-                exprtype,
+                exprtype: _,
                 ptr,
                 depth,
             } => match op {
