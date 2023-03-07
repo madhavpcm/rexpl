@@ -1,7 +1,7 @@
+begin
 decl
     int n,i,j,sum,k;
-enddecl;
-begin
+enddecl
     read(n);
     sum=0;
     k=1;
@@ -20,4 +20,4 @@ begin
         k=k+1;
     endwhile;
     write(sum);
-end;
+end

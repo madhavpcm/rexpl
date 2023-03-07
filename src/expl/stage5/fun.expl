@@ -1,0 +1,20 @@
+decl
+	int fun(int x);
+	int a;
+enddecl
+
+int fun(int x)
+{
+	decl
+	enddecl
+	begin
+		if(x >= 91) then
+			a = 91;
+		else
+			a = fun(fun(x+11));
+	endif;
+
+	return a;
+	end
+}
+

@@ -1,4 +1,7 @@
-// Libraries
+// TODO Validation of ****ptr types
+// TODO Handle **** expressions
+// TODO call to undefined functions
+//
 use env_logger::{Builder, Env};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
@@ -68,6 +71,11 @@ fn main() {
     }
     if let Some(Ok(r)) = expr_res {
         codegen::code_gen(&r, filename.to_owned() + ".o");
+    } else {
+        if let Some(Err(e)) = expr_res {
+            log::error!("{}", e);
+            process::exit(1);
+        }
     }
     linker::linker(filename).expect("Linking failed");
 

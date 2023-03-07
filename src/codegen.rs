@@ -3,6 +3,7 @@ use crate::parserlib::*;
 use crate::validation::*;
 
 use lazy_static::lazy_static; // 1.4.0
+use std::cmp::max;
 use std::cmp::min;
 use std::collections::LinkedList;
 use std::fs::{File, OpenOptions};
@@ -26,13 +27,36 @@ lazy_static! {
     //Need a stack to call F(F(F(5))) type calls
     pub static ref REGISTER_STACK: Mutex<Vec<Vec<(bool, i64)>>> = Mutex::new(Vec::default());
     //TODO remove this stack
-    pub static ref FSTACK: Mutex<(String,usize)> = Mutex::new((String::default(),0));
+    pub static ref FSTACK: Mutex<(String,i64)> = Mutex::new((String::default(),0));
 }
 
 //Wrap error and write to file
 fn write_line(mut writer: &File, args: std::fmt::Arguments) {
     if let Err(e) = writeln!(writer, "{}", args) {
         exit_on_err(e.to_string());
+    }
+}
+/*
+ * Get the size of the local declaration
+ */
+fn __get_function_storage(fname: &String) -> i64 {
+    let ft = FUNCTION_TABLE.lock().unwrap();
+    let mut max_size = 0;
+    if let Some(entry) = ft.get(fname) {
+        for (
+            _k,
+            LSymbol::Var {
+                vartype: _,
+                varid,
+                varindices: _,
+            },
+        ) in entry.iter()
+        {
+            max_size = max(varid.clone(), max_size);
+        }
+        return max_size;
+    } else {
+        return 0;
     }
 }
 /*
@@ -176,21 +200,18 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         ASTNode::STR(s) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-            write_line(file, format_args!("MOV R{},{}", register, s));
+            write_line(file, format_args!("MOV R{}, {}", register, s));
             registers[register].1 = 0;
             register
         }
         ASTNode::INT(n) => {
             let register = get_reg();
             let mut registers = REGISTERS.lock().unwrap();
-            write_line(file, format_args!("MOV R{},{}", register, n));
+            write_line(file, format_args!("MOV R{}, {}", register, n));
             registers[register].1 = *n;
             register
         }
         ASTNode::VAR { name, indices } => {
-            if varinscope(name) == Ok(false) {
-                exit_on_err("Variable : [".to_owned() + name.as_str() + "] is not declared");
-            }
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
@@ -202,128 +223,27 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(registers);
 
             for i in 0..indices.len() {
-                match *indices[i] {
-                    ASTNode::STR(_) => {
-                        exit_on_err(
-                            "str Type cannot be used to index variable [".to_owned() + name + "]",
-                        );
-                    }
-                    ASTNode::INT(num) => {
-                        let offsetreg = get_reg();
-
-                        write_line(file, format_args!("MOV R{},{}", offsetreg, num));
-
-                        if i != indices.len() - 1 {
-                            let indexmulreg = get_reg();
-                            let mut registers = REGISTERS.lock().unwrap();
-
-                            if let Err(e) =
-                                writeln!(file, "MOV R{}, {}", indexmulreg, varindices[i])
-                            {
-                                exit_on_err(e.to_string());
-                            }
-
-                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
-
-                            registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
-
-                            std::mem::drop(registers);
-                            free_reg(indexmulreg);
-                        }
-
-                        let mut registers = REGISTERS.lock().unwrap();
-                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
-                        registers[baseaddrreg].1 += registers[offsetreg].1;
-
-                        std::mem::drop(registers);
-                        free_reg(offsetreg);
-                    }
-                    ASTNode::VAR {
-                        name: _,
-                        indices: _,
-                    } => {
-                        if getexprtype(&*indices[i]) != Some(ASTExprType::Int) {
-                            exit_on_err(
-                                "Variable with invalid type used to index".to_owned()
-                                    + name
-                                    + ("[]".repeat(i)).as_str()
-                                    + "[x]",
-                            );
-                        }
-                        let offsetreg = __code_gen(&*indices[i], file, false);
-
-                        if i != indices.len() - 1 {
-                            let indexmulreg = get_reg();
-                            let mut registers = REGISTERS.lock().unwrap();
-
-                            if let Err(e) =
-                                writeln!(file, "MOV R{}, {}", indexmulreg, varindices[i])
-                            {
-                                exit_on_err(e.to_string());
-                            }
-
-                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
-
-                            registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
-
-                            std::mem::drop(registers);
-                            free_reg(indexmulreg);
-                        }
-                        let mut registers = REGISTERS.lock().unwrap();
-
-                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
-                        registers[baseaddrreg].1 += registers[offsetreg].1;
-
-                        std::mem::drop(registers);
-                        free_reg(offsetreg);
-                    }
-                    //Normal case
-                    ASTNode::BinaryNode {
-                        op: _,
-                        exprtype: _,
-                        lhs: _,
-                        rhs: _,
-                    } => {
-                        let exprtype = getexprtype(&*indices[i]);
-                        if exprtype != Some(ASTExprType::Int) {
-                            exit_on_err(
-                                "Invalid expression type used to index".to_owned()
-                                    + name
-                                    + ("[]".repeat(i)).as_str()
-                                    + "[x]",
-                            );
-                        }
-                        let offsetreg = __code_gen(&*indices[i], file, false);
-
-                        if i != indices.len() - 1 {
-                            let indexmulreg = get_reg();
-                            let mut registers = REGISTERS.lock().unwrap();
-
-                            if let Err(e) =
-                                writeln!(file, "MOV R{}, {}", indexmulreg, varindices[i])
-                            {
-                                exit_on_err(e.to_string());
-                            }
-
-                            write_line(file, format_args!("MUL R{}, R{}", offsetreg, indexmulreg));
-
-                            registers[offsetreg].1 *= i64::try_from(varindices[i]).unwrap();
-
-                            std::mem::drop(registers);
-                            free_reg(indexmulreg);
-                        }
-
-                        let mut registers = REGISTERS.lock().unwrap();
-                        write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
-                        registers[baseaddrreg].1 += registers[offsetreg].1;
-
-                        std::mem::drop(registers);
-                        free_reg(offsetreg);
-                    }
-                    _ => exit_on_err("Invalid token as index".to_string()),
-                };
+                //Generate code for first index
+                let offsetreg = __code_gen(&*indices[i], file, false);
+                //Multiple unless its the last index
+                //varindices because we need to handle a[2][2] with a[1] access as pointer
+                if i != varindices.len() - 1 {
+                    //Get register for multiplication
+                    let indexmulreg = get_reg();
+                    //Multiply with the corresponding declared index
+                    write_line(file, format_args!("MUL R{}, {}", offsetreg, varindices[i]));
+                    //free this for reuse
+                    free_reg(indexmulreg);
+                }
+                //Add the offset
+                let mut registers = REGISTERS.lock().unwrap();
+                write_line(file, format_args!("ADD R{}, R{}", baseaddrreg, offsetreg));
+                registers[baseaddrreg].1 += registers[offsetreg].1;
+                std::mem::drop(registers);
+                //Free this for reuse
+                free_reg(offsetreg);
             }
-            if refr == false {
+            if refr == false && varindices.len() == indices.len() {
                 write_line(
                     file,
                     format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
@@ -341,11 +261,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Gt => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("GT {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("GT R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 > registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -359,11 +279,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Lt => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("LT {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("LT R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 < registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -377,11 +297,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Gte => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("GE {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("GE R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 >= registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -395,11 +315,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Lte => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("LE {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("LE R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 <= registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -413,11 +333,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Ee => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("EQ {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("EQ R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 == registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -431,11 +351,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Ne => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
-                    write_line(file, format_args!("NE {}, {}", left_operand, right_operand));
+                    write_line(
+                        file,
+                        format_args!("NE R{}, R{}", left_register, right_register),
+                    );
                     let result: i64 = (registers[left_register].1 != registers[right_register].1)
                         .try_into()
                         .unwrap();
@@ -449,13 +369,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Plus => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("ADD {}, {}", left_operand, right_operand),
+                        format_args!("ADD R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 + registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -468,13 +385,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Minus => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("SUB {}, {}", left_operand, right_operand),
+                        format_args!("SUB R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 - registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -487,13 +401,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Star => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("MUL {}, {}", left_operand, right_operand),
+                        format_args!("MUL R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 * registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -506,13 +417,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Slash => {
                     let left_register: usize = __code_gen(lhs, file, false).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
-                    let left_operand: String = "R".to_owned() + left_register.to_string().as_str();
-                    let right_operand: String =
-                        "R".to_owned() + right_register.to_string().as_str();
                     let mut registers = REGISTERS.lock().unwrap();
                     write_line(
                         file,
-                        format_args!("DIV {}, {}", left_operand, right_operand),
+                        format_args!("DIV R{}, R{}", left_register, right_register),
                     );
                     let result: i64 = registers[left_register].1 / registers[right_register].1;
                     let lower_register = min(left_register, right_register);
@@ -543,7 +451,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
                     write_line(
                         file,
-                        format_args!("MOV [R{}],R{}", left_register, right_register),
+                        format_args!("MOV [R{}], R{}", left_register, right_register),
                     );
                     free_reg(left_register);
                     free_reg(right_register);
@@ -560,7 +468,12 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             };
             result
         }
-        ASTNode::UnaryNode { op, ptr } => match op {
+        ASTNode::UnaryNode {
+            op,
+            exprtype: _,
+            ptr,
+            depth,
+        } => match op {
             ASTNodeType::Read => {
                 __backup_registers(file);
                 let register = get_reg();
@@ -618,7 +531,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     indices: _,
                 } => {
                     let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
-                    write_line(file, format_args!("MOV R{},[R{}]", regaddr, regaddr));
+                    for _i in 0..depth.unwrap() {
+                        write_line(file, format_args!("MOV R{},[R{}]", regaddr, regaddr));
+                    }
                     return regaddr;
                 }
                 _ => {
@@ -676,7 +591,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             std::mem::drop(registers);
             25
         }
-        ASTNode::MainNode { decl, body } => {
+        ASTNode::MainNode { body } => {
             //this node is traverse after all function def nodes,
             write_line(
                 file,
@@ -690,10 +605,16 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 std::mem::drop(lst);
 
                 write_line(file, format_args!("PUSH BP\nMOV BP,SP",));
-                write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
+                write_line(
+                    file,
+                    format_args!("ADD SP, {}", __get_function_storage(&"main".to_owned())),
+                );
                 //idk
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = ("main".to_string(), get_ldecl_storage(decl));
+                *fs = (
+                    "main".to_string(),
+                    __get_function_storage(&"main".to_owned()),
+                );
                 std::mem::drop(fs);
 
                 __backup_registers(file);
@@ -710,11 +631,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             }
             25
         }
-        ASTNode::FuncDeclNode {
-            fname: _,
-            ret_type: _,
-            paramlist: _,
-        } => 25,
         /*
          * L{funclabel}:
          *    Subtract SP by declvars.size()
@@ -725,22 +641,24 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             fname,
             ret_type: _,
             paramlist: _,
-            decl,
             body,
         } => {
             write_line(
                 file,
                 format_args!("L{}:\nBRKP\nPUSH BP\nMOV BP,SP", get_function_label(fname)),
             );
-            write_line(file, format_args!("ADD SP, {}", get_ldecl_storage(decl)));
+            write_line(
+                file,
+                format_args!("ADD SP, {}", __get_function_storage(fname)),
+            );
             let ft = FUNCTION_TABLE.lock().unwrap();
             if let Some(_local_table) = ft.get(fname) {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();
-                *fs = (fname.clone(), get_ldecl_storage(decl));
                 std::mem::drop(ft);
                 std::mem::drop(lst);
+                *fs = (fname.clone(), __get_function_storage(fname));
                 std::mem::drop(fs);
 
                 __code_gen(&**body, file, false);
@@ -872,10 +790,6 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 .expect("[code_gen] Write error");
             25
         }
-        ASTNode::DeclNode {
-            var_type: _,
-            list: _,
-        } => 25,
         ASTNode::Null => 25,
     }
 }
@@ -893,7 +807,7 @@ fn __header_gen(mut file: &File) {
     gst.insert(
         "main".to_string(),
         GSymbol::Func {
-            ret_type: (ASTExprType::Int),
+            ret_type: (ASTExprType::Primitive(PrimitiveType::Int)),
             paramlist: LinkedList::new(),
             flabel: (l),
         },
