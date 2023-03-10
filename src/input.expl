@@ -2,6 +2,7 @@ type
 	ss {
 		int a;
 		int b;
+		ss* c;
 	};
 endtype
 

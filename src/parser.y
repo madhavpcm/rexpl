@@ -117,6 +117,7 @@ DeclType -> Result<ASTExprType,String>:
 Start -> Result<ASTNode,String>:
 	TypeDefBlock GDeclBlock FDefBlock MainBlock
 	{
+		$1?;
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
@@ -126,6 +127,7 @@ Start -> Result<ASTNode,String>:
 	}
 	| TypeDefBlock GDeclBlock MainBlock
 	{
+		$1?;
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
@@ -889,6 +891,7 @@ VariableExpr -> Result<ASTNode,String>:
 TypeDefBlock -> Result<(),String>:
 	"TYPE" TypeDefList "ENDTYPE"
 	{
+		$2?;
 		Ok(())
 	}
 	|
@@ -901,10 +904,13 @@ TypeDefBlock -> Result<(),String>:
 TypeDefList -> Result<(),String>:
 	TypeDef TypeDefList
 	{
+		$1?;
+		$2?;
 		Ok(())	
 	}
 	| TypeDef
 	{
+		$1?;
 		Ok(())
 	}
 	;

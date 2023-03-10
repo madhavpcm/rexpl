@@ -46,36 +46,36 @@ impl TYPE_TABLE {
 
         for i in tfields.iter() {
             //validate the type
-            let res = match &i.field_type {
-                FieldType::Primitive(_) => Ok(()),
+            match &i.field_type {
+                FieldType::Primitive(_) => {}
                 FieldType::Pointer(p) => {
                     let base = p.get_base_type();
                     match base {
-                        FieldType::Primitive(_) => Ok(()),
+                        FieldType::Primitive(_) => {}
                         FieldType::Struct(s) => {
-                            if map.get(&s).is_some() {
-                                Ok(())
-                            } else {
-                                Err("Type [".to_owned() + &s + "] is not declared.")
+                            if map.contains_key(&s) == false {
+                                return Err("Type [".to_owned() + &s + "] is not declared.");
                             }
                         }
-                        _ => Err("Some error".to_owned()),
+                        _ => {
+                            return Err("Some error".to_owned());
+                        }
                     }
                 }
                 FieldType::Struct(s) => {
                     //We can choose to disallow this
-                    if s == &tname {
+                    if *s == tname {
                         return Err("Type [".to_owned() + &s + "] is incomplete.");
-                    }
-                    if map.get(s).is_some() {
-                        Ok(())
                     } else {
-                        Err("Type [".to_owned() + &s + "] is not declared.")
+                        if map.contains_key(s) == false {
+                            return Err("Type [".to_owned() + &s + "] is not declared.");
+                        }
                     }
                 }
-                _ => Err("Some error".to_owned()),
+                _ => {
+                    return Err("Some error".to_owned());
+                }
             };
-            res?;
             if fieldcheck.contains(&i.name) {
                 return Err("In Type [".to_owned()
                     + &tname

@@ -1,5 +1,3 @@
-// TODO Validation of ****ptr types
-// TODO Handle **** expressions
 // TODO call to undefined functions
 //
 use env_logger::{Builder, Env};
