@@ -1,3 +1,10 @@
+type
+	ss {
+		int a;
+		int b;
+	};
+endtype
+
 decl
 	int foo(int b, int c, int d);
 enddecl

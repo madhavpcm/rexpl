@@ -51,17 +51,29 @@ Type -> Result<ASTExprType,String>:
 	{
 		Ok(ASTExprType::Primitive(PrimitiveType::String))
 	}
+	| 'VAR'
+	{
+		let v = $1.map_err(|_| "VAR Err".to_string())?; 
+		let typename= parse_string($lexer.span_str(v.span())).unwrap();
+		Ok(ASTExprType::Struct(ASTStructType{
+			name: typename,
+			size: 0,
+			fields: LinkedList::default(),
+		}))
+	}
     ;
 ParamType -> Result<ASTExprType,String>: 
 	Type
 	{
 		let t = $1?;
+		//TODO verify
 		Ok(t)
 	}
 	| Type PtrPtr
 	{
 		let mut ptr = $2?;
 		let t = $1?;
+		//TODO verify
 		ptr.set_base_type(t.get_base_type());
 		Ok(ptr)
 	}
@@ -71,6 +83,7 @@ FType-> Result<ASTExprType,String>:
 	{
 		let t = $1?;
 		let mut rt = RET_TYPE.lock().unwrap();
+		//TODO verify
 		*rt = t.clone();
 		Ok(t)
 	}
@@ -79,6 +92,7 @@ FType-> Result<ASTExprType,String>:
 		let mut ptr = $2?;
 		let t = $1?;
 		let mut rt = RET_TYPE.lock().unwrap();
+		//TODO verify
 		ptr.set_base_type(t.get_base_type());
 		*rt = ptr.clone();
 		Ok(ptr)
@@ -101,39 +115,44 @@ DeclType -> Result<ASTExprType,String>:
 
 //Big Picture
 Start -> Result<ASTNode,String>:
-	GDeclBlock FDefBlock MainBlock
+	TypeDefBlock GDeclBlock FDefBlock MainBlock
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-			lhs : Box::new(ASTNode::BinaryNode{
-                op: ASTNodeType::Connector,
-				exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-                lhs: Box::new($3?),
-                rhs: Box::new($2?),
-            }),
-			rhs : Box::new(ASTNode::Null),
+			lhs : Box::new($3?),
+			rhs : Box::new($4?),
 		})
 	}
-	| GDeclBlock MainBlock 
+	| TypeDefBlock GDeclBlock MainBlock
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-			lhs : Box::new($2?),
+			lhs : Box::new($3?),
 			rhs : Box::new(ASTNode::Null),
 		})
 	}
-    | MainBlock 
-    {
-        Ok(ASTNode::BinaryNode{
-            op: ASTNodeType::Connector,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-            lhs: Box::new(ASTNode::Null),
-            rhs: Box::new($1?),
-        })
-    }
 	;
+//	| GDeclBlock MainBlock 
+//	{
+//		Ok(ASTNode::BinaryNode{
+//			op : ASTNodeType::Connector,
+//            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+//			lhs : Box::new($2?),
+//			rhs : Box::new(ASTNode::Null),
+//		})
+//	}
+//    | MainBlock 
+//    {
+//        Ok(ASTNode::BinaryNode{
+//            op: ASTNodeType::Connector,
+//            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+//            lhs: Box::new(ASTNode::Null),
+//            rhs: Box::new($1?),
+//        })
+//    }
+//	;
 MainBlock -> Result<ASTNode,String>:
 	FType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
@@ -164,6 +183,10 @@ BeginBlock -> Result<ASTNode,String>:
 	{
 		Ok(ASTNode::Null)
 	}
+	|
+	{
+		Ok(ASTNode::Null)
+	}
 	;
 GDeclBlock -> ():
 	"DECL" GDeclList "ENDDECL" 
@@ -171,6 +194,10 @@ GDeclBlock -> ():
 	}
 	| "DECL" "ENDDECL" 
 	{
+	}
+	|
+	{
+
 	}
 	;
 LDeclList -> ():
@@ -263,6 +290,16 @@ VarItem -> Result<VarNode,String>:
 		Ok(node)
 	}
     ;
+FBlock -> Result<ASTNode,String>:
+	FDefBlock
+	{
+		$1
+	}
+	|
+	{
+		Ok(ASTNode::Null)
+	}
+	;
 FDefBlock -> Result<ASTNode,String>:
 	FDefBlock FDef 
 	{
@@ -315,6 +352,9 @@ LDeclBlock -> ():
 	{
 	}
 	| "DECL" "ENDDECL"
+	{
+	}
+	|
 	{
 	}
 	;
@@ -844,6 +884,107 @@ VariableExpr -> Result<ASTNode,String>:
 		Ok(node)
 	}
 	;
+
+//UserDefined Types
+TypeDefBlock -> Result<(),String>:
+	"TYPE" TypeDefList "ENDTYPE"
+	{
+		Ok(())
+	}
+	|
+	{
+		Ok(())
+	}
+	;
+
+
+TypeDefList -> Result<(),String>:
+	TypeDef TypeDefList
+	{
+		Ok(())	
+	}
+	| TypeDef
+	{
+		Ok(())
+	}
+	;
+
+TypeDef -> Result<(),String>:
+	"VAR" '{' FieldDeclList '}' ';'
+	{
+		let v = $1.map_err(|_| "VAR Err".to_string())?;
+		let typename = parse_string($lexer.span_str(v.span())).unwrap();
+		let fields = $3?;
+		let mut mtt = MUTEX_TYPE_TABLE.lock().unwrap();
+		mtt.tinstall(typename, fields)?;
+		Ok(())
+	}
+	;
+
+FieldDeclList -> Result<LinkedList<Field>,String>:
+	FieldDecl FieldDeclList
+	{
+		let mut f1 = LinkedList::from($1?);
+		let mut f2 = $2?;
+		f1.append(&mut f2);
+		Ok(f1)
+	}
+	| FieldDecl
+	{
+		let field = $1?;
+		Ok(LinkedList::from(field))
+	}
+	;
+
+FieldDecl -> Result<Field,String>:
+	FieldType "VAR" ';'
+	{
+		let v = $2.map_err(|_| "VAR Err".to_string())?; 
+		Ok(Field{
+		name:parse_string($lexer.span_str(v.span())).unwrap(),
+			field_type: $1?,
+		})
+	}
+	| FieldType FieldPtr "VAR" ';'
+	{
+		let basetype = $1?;
+		let mut ptrtype = $2?;
+		let v = $3.map_err(|_| "VAR Err".to_string())?; 
+		ptrtype.set_base_type(basetype.get_base_type());
+		Ok(Field{
+		name :parse_string($lexer.span_str(v.span())).unwrap(),
+			field_type: ptrtype
+		})
+	}
+	;
+FieldType -> Result<FieldType,String>: 
+	'INT_T'
+	{
+		Ok(FieldType::Primitive(PrimitiveType::Int))
+	} 
+	| 'STR_T'
+	{
+		Ok(FieldType::Primitive(PrimitiveType::String))
+	}
+	| 'VAR'
+	{
+		let v = $1.map_err(|_| "VAR Err".to_string())?; 
+		let typename= parse_string($lexer.span_str(v.span())).unwrap();
+		Ok(FieldType::Struct(typename))
+	}
+    ;
+
+FieldPtr-> Result<FieldType,String>: 
+	FieldPtr '*'
+	{
+		Ok(FieldType::Pointer(Box::new($1?)))
+	}
+	| '*'
+	{
+		Ok(FieldType::Pointer(Box::new(FieldType::Primitive(PrimitiveType::Void))))
+	}
+	;
+
 %%
 // Any functions here are in scope for all the grammar actions above.
 use crate::parserlib::{*};

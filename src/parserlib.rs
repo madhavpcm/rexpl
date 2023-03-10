@@ -1,6 +1,6 @@
 use lazy_static::lazy_static; // 1.4.0
-use std::collections::HashMap;
 use std::collections::LinkedList;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Mutex;
 
@@ -8,6 +8,7 @@ use crate::codegen::exit_on_err;
 use crate::codegen::LABEL_COUNT;
 
 lazy_static! {
+    pub static ref MUTEX_TYPE_TABLE: Mutex<TYPE_TABLE> = Mutex::new(TYPE_TABLE::default());
     pub static ref FUNCTION_TABLE: Mutex<HashMap<String, HashMap<String, LSymbol>>> =
         Mutex::new(HashMap::default());
     pub static ref GLOBALSYMBOLTABLE: Mutex<HashMap<String, GSymbol>> =
@@ -20,6 +21,80 @@ lazy_static! {
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
     pub static ref DECL_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
+}
+pub struct TYPE_TABLE {
+    pub table: HashMap<String, ASTExprType>,
+}
+impl Default for TYPE_TABLE {
+    fn default() -> TYPE_TABLE {
+        TYPE_TABLE {
+            table: (HashMap::default()),
+        }
+    }
+}
+impl TYPE_TABLE {
+    pub fn tinstall(&mut self, tname: String, tfields: LinkedList<Field>) -> Result<(), String> {
+        let map = &mut self.table;
+        if map.contains_key(&tname) {
+            return Err("Type [".to_owned() + &tname + "] is already declared.");
+        }
+        if tfields.len() > 8 {
+            return Err("Type [".to_owned() + &tname + "] has more than 8 fields.");
+        }
+        let mut fieldcheck: HashSet<String> = HashSet::new();
+        map.insert(tname.clone(), ASTExprType::Error);
+
+        for i in tfields.iter() {
+            //validate the type
+            let res = match &i.field_type {
+                FieldType::Primitive(_) => Ok(()),
+                FieldType::Pointer(p) => {
+                    let base = p.get_base_type();
+                    match base {
+                        FieldType::Primitive(_) => Ok(()),
+                        FieldType::Struct(s) => {
+                            if map.get(&s).is_some() {
+                                Ok(())
+                            } else {
+                                Err("Type [".to_owned() + &s + "] is not declared.")
+                            }
+                        }
+                        _ => Err("Some error".to_owned()),
+                    }
+                }
+                FieldType::Struct(s) => {
+                    //We can choose to disallow this
+                    if s == &tname {
+                        return Err("Type [".to_owned() + &s + "] is incomplete.");
+                    }
+                    if map.get(s).is_some() {
+                        Ok(())
+                    } else {
+                        Err("Type [".to_owned() + &s + "] is not declared.")
+                    }
+                }
+                _ => Err("Some error".to_owned()),
+            };
+            res?;
+            if fieldcheck.contains(&i.name) {
+                return Err("In Type [".to_owned()
+                    + &tname
+                    + "], field ["
+                    + &i.name
+                    + "] is declared more than once.");
+            }
+            fieldcheck.insert(i.name.clone());
+        }
+        map.insert(
+            tname.clone(),
+            ASTExprType::Struct(ASTStructType {
+                name: tname.clone(),
+                size: tfields.len(),
+                fields: tfields,
+            }),
+        );
+        Ok(())
+    }
 }
 #[derive(Debug, Clone)]
 pub enum GSymbol {
@@ -77,40 +152,54 @@ pub enum PrimitiveType {
     Void,
     Null,
 }
-//Overload for printing exprtype
-impl std::fmt::Display for PrimitiveType {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            PrimitiveType::Int => write!(f, "int_t"),
-            PrimitiveType::String => write!(f, "str_t"),
-            PrimitiveType::Bool => write!(f, "bool_t"),
-            PrimitiveType::Void => write!(f, "void_t"),
-            _ => {
-                write!(f, "null_t")
-            }
-        }
-    }
-}
-impl std::fmt::Display for ASTExprType {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            ASTExprType::Error => write!(f, "ASTExprType :: Error"),
-            ASTExprType::Primitive(p) => write!(f, "{}", p),
-            ASTExprType::Pointer(p) => write!(f, "{}{}", "*".repeat(p.depth()), p.get_base_type()),
-        }
-    }
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub enum FieldType {
+    Primitive(PrimitiveType),
+    Pointer(Box<FieldType>),
+    Struct(String),
 }
 
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct Field {
+    pub name: String,
+    pub field_type: FieldType,
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+pub struct ASTStructType {
+    pub name: String,
+    pub size: usize,
+    pub fields: LinkedList<Field>,
+}
 // an expression could be a primitive type or a pointer to a primitive type or so on..
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub enum ASTExprType {
     Primitive(PrimitiveType),
     Pointer(Box<ASTExprType>),
+    Struct(ASTStructType),
     Error,
 }
 
 impl ASTExprType {
-    //Only used by parser
+    pub fn get_field_id(self, fname: &String) -> Result<usize, String> {
+        match self {
+            ASTExprType::Struct(s) => {
+                let mut len = 1;
+                for i in s.fields.iter() {
+                    if &i.name == fname {
+                        return Ok(len);
+                    }
+                    len += 1;
+                }
+                Err("Field [".to_owned()
+                    + fname.as_str()
+                    + "] not declared inside type ["
+                    + fname.as_str()
+                    + "]")
+            }
+            _ => Err("This field cannot be dereferenced.".to_owned()),
+        }
+    }
     pub fn refr(&self) -> Option<ASTExprType> {
         match self {
             ASTExprType::Error => None,
@@ -121,32 +210,60 @@ impl ASTExprType {
         match self {
             ASTExprType::Primitive(_) => None,
             ASTExprType::Pointer(p) => Some((**p).clone()),
+            ASTExprType::Struct { .. } => None,
             ASTExprType::Error => None,
         }
     }
-    pub fn set_base_type(&mut self, p: PrimitiveType) {
+    pub fn set_base_type(&mut self, p: ASTExprType) {
         match self {
-            ASTExprType::Primitive(t) => {
-                *t = p.clone();
-            }
+            ASTExprType::Primitive(t) => *self = p,
             ASTExprType::Pointer(b) => {
                 b.set_base_type(p);
             }
+            ASTExprType::Struct { .. } => *self = p,
             ASTExprType::Error => {}
         }
     }
-    pub fn get_base_type(&self) -> PrimitiveType {
+    pub fn get_base_type(&self) -> ASTExprType {
         match self {
-            ASTExprType::Primitive(p) => p.clone(),
+            ASTExprType::Primitive(p) => self.clone(),
             ASTExprType::Pointer(p) => Self::get_base_type(p),
-            ASTExprType::Error => PrimitiveType::Void,
+            ASTExprType::Struct { .. } => self.clone(),
+            ASTExprType::Error => ASTExprType::Primitive(PrimitiveType::Void),
         }
     }
     pub fn depth(&self) -> usize {
         match self {
             ASTExprType::Pointer(p) => Self::depth(p) + 1,
             ASTExprType::Primitive(_) => 0,
+            ASTExprType::Struct { .. } => 0,
             ASTExprType::Error => 0,
+        }
+    }
+}
+
+impl FieldType {
+    pub fn set_base_type(&mut self, p: FieldType) {
+        match self {
+            FieldType::Primitive(t) => *self = p,
+            FieldType::Pointer(b) => {
+                b.set_base_type(p);
+            }
+            FieldType::Struct { .. } => *self = p,
+        }
+    }
+    pub fn get_base_type(&self) -> FieldType {
+        match self {
+            FieldType::Primitive(p) => self.clone(),
+            FieldType::Pointer(p) => Self::get_base_type(p),
+            FieldType::Struct(_) => self.clone(),
+        }
+    }
+    pub fn depth(&self) -> usize {
+        match self {
+            FieldType::Pointer(p) => Self::depth(p) + 1,
+            FieldType::Primitive(_) => 0,
+            FieldType::Struct(_) => 0,
         }
     }
 }
@@ -157,6 +274,14 @@ pub enum ASTError {
 }
 impl From<VarNode> for LinkedList<VarNode> {
     fn from(param: VarNode) -> Self {
+        let mut list = LinkedList::new();
+        list.push_back(param);
+        list
+    }
+}
+
+impl From<Field> for LinkedList<Field> {
+    fn from(param: Field) -> Self {
         let mut list = LinkedList::new();
         list.push_back(param);
         list
@@ -423,4 +548,29 @@ pub fn __lst_install_params(paramlist: &mut LinkedList<VarNode>) {
 }
 pub fn __parse_debug() {
     log::warn!("Im here");
+}
+
+//Overload for printing exprtype
+impl std::fmt::Display for PrimitiveType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            PrimitiveType::Int => write!(f, "int_t"),
+            PrimitiveType::String => write!(f, "str_t"),
+            PrimitiveType::Bool => write!(f, "bool_t"),
+            PrimitiveType::Void => write!(f, "void_t"),
+            _ => {
+                write!(f, "null_t")
+            }
+        }
+    }
+}
+impl std::fmt::Display for ASTExprType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        match self {
+            ASTExprType::Error => write!(f, "ASTExprType :: Error"),
+            ASTExprType::Primitive(p) => write!(f, "{}", p),
+            ASTExprType::Struct(s) => write!(f, "struct_{}_t", s.name),
+            ASTExprType::Pointer(p) => write!(f, "{}{}", "*".repeat(p.depth()), p.get_base_type()),
+        }
+    }
 }
