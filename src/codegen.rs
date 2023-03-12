@@ -214,8 +214,8 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         ASTNode::VAR {
             name,
             array_access: indices,
-            dot_field_access: _,
-            arrow_field_access: _,
+            dot_field_access,
+            arrow_field_access,
         } => {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
@@ -247,6 +247,59 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 std::mem::drop(registers);
                 //Free this for reuse
                 free_reg(offsetreg);
+            }
+            let mut dotptr = &**dot_field_access;
+            let mut arrowptr = &**arrow_field_access;
+            let mut currtype = getvartype(name).unwrap();
+            for _ in 0..indices.len() {
+                currtype = currtype.derefr().unwrap();
+            }
+            loop {
+                if dotptr == &ASTNode::Null && arrowptr == &ASTNode::Null {
+                    break;
+                }
+                if dotptr != &ASTNode::Null {
+                    if let ASTNode::VAR {
+                        name: nname,
+                        array_access: _,
+                        dot_field_access,
+                        arrow_field_access,
+                    } = dotptr
+                    {
+                        let field_offset = currtype.get_field_id(nname).unwrap();
+                        currtype = currtype.get_field_type(nname).unwrap();
+                        write_line(file, format_args!("ADD R{}, {}", baseaddrreg, field_offset));
+                        dotptr = &**dot_field_access;
+                        arrowptr = &**arrow_field_access;
+                        continue;
+                    }
+                }
+                // check if dot field type is
+                if arrowptr != &ASTNode::Null {
+                    if let ASTNode::VAR {
+                        name: nname,
+                        array_access: _,
+                        dot_field_access,
+                        arrow_field_access,
+                    } = arrowptr
+                    {
+                        if let ASTExprType::Pointer(etype) = &currtype {
+                            write_line(
+                                file,
+                                format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
+                            );
+                            let field_offset = etype.get_field_id(nname).unwrap();
+                            currtype = etype.get_field_type(nname).unwrap();
+                            write_line(
+                                file,
+                                format_args!("ADD R{}, {}", baseaddrreg, field_offset),
+                            );
+                            dotptr = &**dot_field_access;
+                            arrowptr = &**arrow_field_access;
+                            continue;
+                        }
+                    }
+                }
             }
             if refr == false && varindices.len() == indices.len() {
                 write_line(

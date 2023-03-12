@@ -1,7 +1,6 @@
 use crate::codegen::*;
 use crate::parserlib::*;
 use std::collections::LinkedList;
-use std::fmt::Pointer;
 
 pub fn getvartype(name: &String) -> Option<ASTExprType> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -32,6 +31,7 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
     }
     None
 }
+#[allow(dead_code)]
 fn validate_field_array_access(
     array_name: &String,
     parent_type: &ASTExprType,
