@@ -211,7 +211,12 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             registers[register].1 = *n;
             register
         }
-        ASTNode::VAR { name, indices } => {
+        ASTNode::VAR {
+            name,
+            array_access: indices,
+            dot_field_access: _,
+            arrow_field_access: _,
+        } => {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
@@ -514,7 +519,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 match &**ptr {
                     ASTNode::VAR {
                         name: _,
-                        indices: _,
+                        array_access: _,
+                        dot_field_access: _,
+                        arrow_field_access: _,
                     } => {
                         let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
                         return regaddr;
@@ -528,7 +535,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             ASTNodeType::Deref => match &**ptr {
                 ASTNode::VAR {
                     name: _,
-                    indices: _,
+                    array_access: _,
+                    dot_field_access: _,
+                    arrow_field_access: _,
                 } => {
                     let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
                     for _i in 0..depth.unwrap() {

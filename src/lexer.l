@@ -25,6 +25,8 @@ int "INT_T"
 type "TYPE"
 endtype "ENDTYPE"
 
+[.] "DOT"
+-> "ARROW"
 == "=="
 <= "<="
 >= ">="

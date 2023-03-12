@@ -8,7 +8,7 @@ use crate::codegen::exit_on_err;
 use crate::codegen::LABEL_COUNT;
 
 lazy_static! {
-    pub static ref MUTEX_TYPE_TABLE: Mutex<TYPE_TABLE> = Mutex::new(TYPE_TABLE::default());
+    pub static ref TYPE_TABLE: Mutex<TypeTable> = Mutex::new(TypeTable::default());
     pub static ref FUNCTION_TABLE: Mutex<HashMap<String, HashMap<String, LSymbol>>> =
         Mutex::new(HashMap::default());
     pub static ref GLOBALSYMBOLTABLE: Mutex<HashMap<String, GSymbol>> =
@@ -22,17 +22,29 @@ lazy_static! {
     pub static ref DECL_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
 }
-pub struct TYPE_TABLE {
+pub struct TypeTable {
     pub table: HashMap<String, ASTExprType>,
 }
-impl Default for TYPE_TABLE {
-    fn default() -> TYPE_TABLE {
-        TYPE_TABLE {
-            table: (HashMap::default()),
-        }
+impl Default for TypeTable {
+    fn default() -> TypeTable {
+        let mut table: HashMap<String, ASTExprType> = HashMap::default();
+        table.insert("int".to_owned(), ASTExprType::Primitive(PrimitiveType::Int));
+        table.insert(
+            "str".to_owned(),
+            ASTExprType::Primitive(PrimitiveType::String),
+        );
+        TypeTable { table: (table) }
     }
 }
-impl TYPE_TABLE {
+impl TypeTable {
+    pub fn tt_get_type(&self, tname: &String) -> Result<ASTExprType, String> {
+        let table = &self.table;
+        if let Some(entry) = table.get(tname) {
+            Ok(entry.clone())
+        } else {
+            Err("Type [".to_owned() + tname.as_str() + "] is not declared/valid.")
+        }
+    }
     pub fn tinstall(&mut self, tname: String, tfields: LinkedList<Field>) -> Result<(), String> {
         let map = &mut self.table;
         if map.contains_key(&tname) {
@@ -71,9 +83,6 @@ impl TYPE_TABLE {
                             return Err("Type [".to_owned() + &s + "] is not declared.");
                         }
                     }
-                }
-                _ => {
-                    return Err("Some error".to_owned());
                 }
             };
             if fieldcheck.contains(&i.name) {
@@ -163,6 +172,7 @@ pub enum FieldType {
 pub struct Field {
     pub name: String,
     pub field_type: FieldType,
+    pub array_access: Vec<Box<Field>>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -179,9 +189,34 @@ pub enum ASTExprType {
     Struct(ASTStructType),
     Error,
 }
-
+impl FieldType {
+    pub fn as_astexprtype(&self) -> Result<ASTExprType, String> {
+        match self {
+            FieldType::Primitive(p) => Ok(ASTExprType::Primitive(p.clone())),
+            FieldType::Pointer(p) => Ok(ASTExprType::Pointer(Box::new((&**p).as_astexprtype()?))),
+            FieldType::Struct(p) => Ok(TYPE_TABLE.lock().unwrap().tt_get_type(p)?),
+        }
+    }
+}
 impl ASTExprType {
-    pub fn get_field_id(self, fname: &String) -> Result<usize, String> {
+    pub fn get_field_type(&self, fname: &String) -> Result<ASTExprType, String> {
+        match self {
+            ASTExprType::Struct(s) => {
+                for i in s.fields.iter() {
+                    if &i.name == fname {
+                        return i.field_type.as_astexprtype();
+                    }
+                }
+                Err("Field [".to_owned()
+                    + fname.as_str()
+                    + "] not declared inside type ["
+                    + fname.as_str()
+                    + "]")
+            }
+            _ => Err("Expression of this type cannot be accessed.".to_owned()),
+        }
+    }
+    pub fn get_field_id(&self, fname: &String) -> Result<usize, String> {
         match self {
             ASTExprType::Struct(s) => {
                 let mut len = 1;
@@ -197,7 +232,7 @@ impl ASTExprType {
                     + fname.as_str()
                     + "]")
             }
-            _ => Err("This field cannot be dereferenced.".to_owned()),
+            _ => Err("Expression of this type cannot be accessed.".to_owned()),
         }
     }
     pub fn refr(&self) -> Option<ASTExprType> {
@@ -216,7 +251,7 @@ impl ASTExprType {
     }
     pub fn set_base_type(&mut self, p: ASTExprType) {
         match self {
-            ASTExprType::Primitive(t) => *self = p,
+            ASTExprType::Primitive(_) => *self = p,
             ASTExprType::Pointer(b) => {
                 b.set_base_type(p);
             }
@@ -226,7 +261,7 @@ impl ASTExprType {
     }
     pub fn get_base_type(&self) -> ASTExprType {
         match self {
-            ASTExprType::Primitive(p) => self.clone(),
+            ASTExprType::Primitive(_) => self.clone(),
             ASTExprType::Pointer(p) => Self::get_base_type(p),
             ASTExprType::Struct { .. } => self.clone(),
             ASTExprType::Error => ASTExprType::Primitive(PrimitiveType::Void),
@@ -245,7 +280,7 @@ impl ASTExprType {
 impl FieldType {
     pub fn set_base_type(&mut self, p: FieldType) {
         match self {
-            FieldType::Primitive(t) => *self = p,
+            FieldType::Primitive(_) => *self = p,
             FieldType::Pointer(b) => {
                 b.set_base_type(p);
             }
@@ -254,7 +289,7 @@ impl FieldType {
     }
     pub fn get_base_type(&self) -> FieldType {
         match self {
-            FieldType::Primitive(p) => self.clone(),
+            FieldType::Primitive(_) => self.clone(),
             FieldType::Pointer(p) => Self::get_base_type(p),
             FieldType::Struct(_) => self.clone(),
         }
@@ -367,7 +402,12 @@ impl VarNode {
                 varindices: (self.varindices.clone()),
             },
         );
-        let mut size = 1;
+        let mut size = match &self.vartype {
+            ASTExprType::Primitive(_) => 1,
+            ASTExprType::Pointer(_) => 1,
+            ASTExprType::Struct(s) => s.size.clone(),
+            ASTExprType::Error => 0,
+        };
         for i in self.varindices.iter() {
             size *= i;
         }
@@ -402,7 +442,9 @@ pub enum ASTNode {
     STR(String),
     VAR {
         name: String,
-        indices: Vec<Box<ASTNode>>,
+        array_access: Vec<Box<ASTNode>>,
+        dot_field_access: Box<ASTNode>,
+        arrow_field_access: Box<ASTNode>,
     },
     BinaryNode {
         op: ASTNodeType,

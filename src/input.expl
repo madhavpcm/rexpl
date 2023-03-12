@@ -8,16 +8,21 @@ endtype
 
 decl
 	int foo(int b, int c, int d);
+	ss* ins;
 enddecl
 
 int main(){
 	decl
 		int e[10][10],i;
+		int a;
 		int *c;
 		int **b;
+		ss ins;
+		ss* bns;
 	enddecl
 	begin
 		c = e[1];
+		bns -> c = &ins;
 		return 0;
 	end
 }

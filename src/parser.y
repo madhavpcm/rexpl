@@ -17,7 +17,7 @@
 %token "WHILE"
 %token "DO"
 %token "ENDWHILE"
-%token "VAR"
+%token 'VAR'
 %token "BREAK"
 %token "BREAKPOINT"
 %token "CONTINUE"
@@ -26,6 +26,8 @@
 %token "ENDDECL"
 %token "RETURN"
 %token ";"
+%token "DOT"
+%token "ARROW"
 %token "="
 %nonassoc ">" "<" ">=" '<=' "==" "!="
 %left '+' '-'
@@ -55,25 +57,20 @@ Type -> Result<ASTExprType,String>:
 	{
 		let v = $1.map_err(|_| "VAR Err".to_string())?; 
 		let typename= parse_string($lexer.span_str(v.span())).unwrap();
-		Ok(ASTExprType::Struct(ASTStructType{
-			name: typename,
-			size: 0,
-			fields: LinkedList::default(),
-		}))
+		let mtt = TYPE_TABLE.lock().unwrap();
+		Ok(mtt.tt_get_type(&typename)?)
 	}
     ;
 ParamType -> Result<ASTExprType,String>: 
 	Type
 	{
 		let t = $1?;
-		//TODO verify
 		Ok(t)
 	}
 	| Type PtrPtr
 	{
 		let mut ptr = $2?;
 		let t = $1?;
-		//TODO verify
 		ptr.set_base_type(t.get_base_type());
 		Ok(ptr)
 	}
@@ -111,6 +108,15 @@ DeclType -> Result<ASTExprType,String>:
 		*dt = ASTExprType::Primitive(PrimitiveType::String);
 		Ok(dt.clone())
 	}
+	| 'VAR'
+	{
+		let v = $1.map_err(|_| "VAR Err".to_string())?; 
+		let typename= parse_string($lexer.span_str(v.span())).unwrap();
+		let mut dt = DECL_TYPE.lock().unwrap();
+		let mtt = TYPE_TABLE.lock().unwrap();
+		*dt = mtt.tt_get_type(&typename)?;
+		Ok(dt.clone())
+	}
     ;
 
 //Big Picture
@@ -136,25 +142,6 @@ Start -> Result<ASTNode,String>:
 		})
 	}
 	;
-//	| GDeclBlock MainBlock 
-//	{
-//		Ok(ASTNode::BinaryNode{
-//			op : ASTNodeType::Connector,
-//            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-//			lhs : Box::new($2?),
-//			rhs : Box::new(ASTNode::Null),
-//		})
-//	}
-//    | MainBlock 
-//    {
-//        Ok(ASTNode::BinaryNode{
-//            op: ASTNodeType::Connector,
-//            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-//            lhs: Box::new(ASTNode::Null),
-//            rhs: Box::new($1?),
-//        })
-//    }
-//	;
 MainBlock -> Result<ASTNode,String>:
 	FType "MAIN" '('  ')' '{' LDeclBlock BeginBlock '}'
 	{
@@ -190,87 +177,115 @@ BeginBlock -> Result<ASTNode,String>:
 		Ok(ASTNode::Null)
 	}
 	;
-GDeclBlock -> ():
+GDeclBlock -> Result<(),String>:
 	"DECL" GDeclList "ENDDECL" 
 	{
+		$2?;
+		Ok(())
 	}
 	| "DECL" "ENDDECL" 
 	{
+		Ok(())
 	}
 	|
 	{
-
+		Ok(())
 	}
 	;
-LDeclList -> ():
+LDeclList -> Result<(),String>:
 	LDeclList LDecl 
 	{
+		$1?;
+		$2?;
+		Ok(())
 	}
 	| LDecl
 	{
+		$1?;
+		Ok(())
 	}
 	;
-GDeclList -> ():
+GDeclList -> Result<(),String>:
 	GDecl GDeclList
 	{
+		$1?;
+		$2?;
+		Ok(())
 	}
 	| GDecl
 	{
+		$1?;
+		Ok(())
 	}
 	;
-LDecl ->  ():
+LDecl ->  Result<(),String>:
 	DeclType LLine ';'
 	{
+		$1?;
+		$2?;
+		Ok(())
 	}
 	;
-GDecl ->  ():
+GDecl ->  Result<(),String>:
 	DeclType GLine ';'
 	{
+		$1?;
+		$2?;
+		Ok(())
 	}
 	;
-GLine -> ():
+GLine -> Result<(),String>:
 	GItem ',' GLine
 	{
+		$1?;
+		$3?;
+		Ok(())
 	}
 	| GItem
 	{
+		$1?;
+		Ok(())
 	}
 	;
-GItem -> ():
-	"VAR" '(' ParamList ')' 
+GItem -> Result<(),String>:
+	'VAR' '(' ParamList ')' 
 	{
 		let returntype = DECL_TYPE.lock().unwrap().clone();
-		let v = $1.map_err(|_| ()).unwrap();
+		let v = $1.map_err(|_| "VAR Err".to_string()).unwrap();
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
-		let paramlist = $3.unwrap();
+		let paramlist = $3?;
 		install_func_to_gst(functionname,returntype,&paramlist);
+		Ok(())
 	}
-	| PtrPtr "VAR" '(' ParamList ')'
+	| PtrPtr 'VAR' '(' ParamList ')'
 	{
 		let base= DECL_TYPE.lock().unwrap().clone();
-		let mut returntype = $1.unwrap();
+		let mut returntype = $1?;
 		returntype.set_base_type(base.get_base_type());
-		let v = $2.map_err(|_| ()).unwrap();
+		let v = $2.map_err(|_| "VAR Err".to_string()).unwrap();
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
-		let paramlist = $4.unwrap();
+		let paramlist = $4?;
 		install_func_to_gst(functionname,returntype,&paramlist);
+		Ok(())
 	}
 	| VarItem
 	{
-		let mut node = $1.unwrap();
+		let mut node = $1?;
 		let dt = DECL_TYPE.lock().unwrap().clone();
 		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_gst();
+		Ok(())
 	}
 	;
 
-LLine -> ():
+LLine -> Result<(),String>:
 	VarItem ',' LLine
 	{
-		let mut node = $1.unwrap();
+		let mut node = $1?;
 		let dt = DECL_TYPE.lock().unwrap().clone();
 		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_lst();
+		Ok(())
 	}
 	| VarItem 
 	{
@@ -278,6 +293,7 @@ LLine -> ():
 		let dt = DECL_TYPE.lock().unwrap().clone();
 		node.vartype.set_base_type(dt.get_base_type());
 		node.install_to_lst();
+		Ok(())
 	}
 	;
 VarItem -> Result<VarNode,String>: 
@@ -318,7 +334,7 @@ FDefBlock -> Result<ASTNode,String>:
 	}
 	;
 FDef ->Result<ASTNode,String>:
-	FType "VAR" '(' ParamListBlock ')' '{' LDeclBlock BeginBlock '}'
+	FType 'VAR' '(' ParamListBlock ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| "VAR Err".to_string())?; 
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
@@ -409,7 +425,7 @@ ArgList -> Result<LinkedList<ASTNode>,String>:
 	}
 	;
 VariableDef -> Result<VarNode,String>:
-	"VAR" 
+	'VAR' 
 	{
 		let v = $1.map_err(|_| "VAR Err".to_string())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
@@ -419,7 +435,7 @@ VariableDef -> Result<VarNode,String>:
 			varindices: vec![],
 		})
 	}
-	| "VAR" "[" "INT" "]"
+	| 'VAR' "[" "INT" "]"
 	{
 		let v = $1.map_err(|_| "VAR[] Err".to_string())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
@@ -431,7 +447,7 @@ VariableDef -> Result<VarNode,String>:
 			varindices: vec![i],
 		})
 	}
-	| "VAR" "[" "INT" "]" "[" "INT" "]"
+	| 'VAR' "[" "INT" "]" "[" "INT" "]"
 	{
 		let v = $1.map_err(|_| "VAR[][] Err".to_string())?;
 		let var_ = parse_string($lexer.span_str(v.span())).unwrap();
@@ -769,7 +785,7 @@ Expr -> Result<ASTNode,String>:
 	{
 		$1
 	}
-	| "VAR" '(' ')'
+	| 'VAR' '(' ')'
 	{
 		let v = $1.map_err(|_| "VAR()".to_string())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
@@ -780,7 +796,7 @@ Expr -> Result<ASTNode,String>:
 		node.validate()?;
 		Ok(node)
 	}
-	| "VAR" '(' ArgList ')'
+	| 'VAR' '(' ArgList ')'
 	{
 		let v = $1.map_err(|_| "VAR( ArgList )".to_string())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
@@ -795,66 +811,80 @@ Expr -> Result<ASTNode,String>:
 
 //Variables around the code
 Variable -> Result<ASTNode,String>:
-	"VAR"
+	'VAR'
 	{
 		let v = $1.map_err(|_| "VAR Err".to_string())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
 		Ok(ASTNode::VAR{
 			name: var,
-			indices: Vec::default(),
+			array_access: Vec::default(),
+			dot_field_access: Box::new(ASTNode::Null),
+			arrow_field_access: Box::new(ASTNode::Null),
 		})
 	}
-	| "VAR" "[" Expr "]"
+	| 'VAR' VariableArray
 	{
-		let v = $1.map_err(|_| "VAR[] Err".to_string())?;
+		let v = $1.map_err(|_| "VAR Err".to_string())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-		let mut expr = $3?;
-		expr.validate()?;
-		if expr.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
-			exit_on_err(
-				"Invalid expression type used to index".to_owned()
-					+ var.as_str() 
-					+ "[x]",
-			);
-		}
-        let mut ind : Vec<Box<ASTNode>> = Vec::default();
-        ind.push(Box::new(expr));
 		Ok(ASTNode::VAR{
 			name: var,
-			indices: ind,
+			array_access: $2?,
+			dot_field_access: Box::new(ASTNode::Null),
+			arrow_field_access: Box::new(ASTNode::Null),
 		})
 	}
-	| "VAR" "[" Expr "]" "[" Expr "]"
+	| 'VAR' 'DOT' Variable
 	{
-		let v = $1.map_err(|_| "VAR[][] Err".to_string())?;
+		let v = $1.map_err(|_| "VAR Err".to_string())?;
 		let var = parse_string($lexer.span_str(v.span())).unwrap();
-		let mut i = $3?;
-		let mut j = $6?;
-        let mut ind : Vec<Box<ASTNode>> = Vec::default();
-		i.validate()?;
-		if i.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
-			exit_on_err(
-				"Invalid expression type used to index".to_owned()
-					+ var.as_str() 
-					+ "[x]",
-			);
-		}
-		j.validate()?;
-		if j.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
-			exit_on_err(
-				"Invalid expression type used to index".to_owned()
-					+ var.as_str() 
-					+ "[][x]",
-			);
-		}
-        ind.push(Box::new(i));
-        ind.push(Box::new(j));
 		Ok(ASTNode::VAR{
 			name: var,
-			indices:ind 
+			array_access: vec![],
+			dot_field_access: Box::new($3?),
+			arrow_field_access: Box::new(ASTNode::Null),
+		})
+	}
+	| 'VAR' 'ARROW' Variable
+	{
+		let v = $1.map_err(|_| "VAR Err".to_string())?;
+		let var = parse_string($lexer.span_str(v.span())).unwrap();
+		Ok(ASTNode::VAR{
+			name: var,
+			array_access: vec![],
+			dot_field_access: Box::new(ASTNode::Null),
+			arrow_field_access: Box::new($3?),
 		})
 	}
 	;
+
+VariableArray -> Result<Vec<Box<ASTNode>>,String>:
+	'[' Expr ']' VariableArray
+	{
+		let mut i = $2?;
+		i.validate()?;
+		if i.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
+			return Err(
+				"Invalid expression type used to index".to_owned()
+					+ "[x]",
+			);
+		}
+		let mut v: Vec<Box<ASTNode>> = vec![Box::new(i)];v.append(&mut $4?);
+		Ok(v)
+	}
+	| '[' Expr ']'
+	{
+		let mut i = $2?;
+		i.validate()?;
+		if i.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
+			return Err(
+				"Invalid expression type used to index".to_owned()
+					+ "[x]",
+			);
+		}
+		Ok(vec![Box::new(i)])
+	}
+	;
+
 //Variables which could appear in expressions
 VariableExpr -> Result<ASTNode,String>:
 	Variable
@@ -916,12 +946,12 @@ TypeDefList -> Result<(),String>:
 	;
 
 TypeDef -> Result<(),String>:
-	"VAR" '{' FieldDeclList '}' ';'
+	'VAR' '{' FieldDeclList '}' ';'
 	{
 		let v = $1.map_err(|_| "VAR Err".to_string())?;
 		let typename = parse_string($lexer.span_str(v.span())).unwrap();
 		let fields = $3?;
-		let mut mtt = MUTEX_TYPE_TABLE.lock().unwrap();
+		let mut mtt = TYPE_TABLE.lock().unwrap();
 		mtt.tinstall(typename, fields)?;
 		Ok(())
 	}
@@ -943,23 +973,25 @@ FieldDeclList -> Result<LinkedList<Field>,String>:
 	;
 
 FieldDecl -> Result<Field,String>:
-	FieldType "VAR" ';'
+	FieldType 'VAR' ';'
 	{
 		let v = $2.map_err(|_| "VAR Err".to_string())?; 
 		Ok(Field{
-		name:parse_string($lexer.span_str(v.span())).unwrap(),
+			name:parse_string($lexer.span_str(v.span())).unwrap(),
 			field_type: $1?,
+			array_access: vec![],
 		})
 	}
-	| FieldType FieldPtr "VAR" ';'
+	| FieldType FieldPtr 'VAR' ';'
 	{
 		let basetype = $1?;
 		let mut ptrtype = $2?;
 		let v = $3.map_err(|_| "VAR Err".to_string())?; 
 		ptrtype.set_base_type(basetype.get_base_type());
 		Ok(Field{
-		name :parse_string($lexer.span_str(v.span())).unwrap(),
-			field_type: ptrtype
+			name :parse_string($lexer.span_str(v.span())).unwrap(),
+			field_type: ptrtype,
+			array_access: vec![],
 		})
 	}
 	;

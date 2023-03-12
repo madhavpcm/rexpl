@@ -32,20 +32,55 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
     }
     None
 }
+fn validate_field_array_access(
+    array_name: &String,
+    parent_type: &ASTExprType,
+    array_access: &mut Vec<Box<ASTNode>>,
+) -> Result<(), String> {
+    let actual_array_type = parent_type.get_field_type(array_name)?;
+    for ei in 0..array_access.len() {
+        array_access[ei].validate()?;
+        if let Some(ei_type) = array_access[ei].getexprtype() {
+            match ei_type {
+                ASTExprType::Primitive(PrimitiveType::Int) => {
+                    continue;
+                }
+                _ => {
+                    return Err("Invalid type used to index variable [".to_owned()
+                        + array_name.as_str()
+                        + "] at "
+                        + "[]".repeat(ei).as_str());
+                }
+            }
+        } else {
+            return Err("Invalid type used to index variable [".to_owned()
+                + array_name.as_str()
+                + "] at "
+                + "[]".repeat(ei).as_str());
+        }
+    }
+    Ok(())
+}
 impl ASTNode {
     pub fn validate(&mut self) -> Result<(), String> {
-        //while
         match self {
-            ASTNode::VAR { name, indices } => {
+            ASTNode::VAR {
+                name,
+                array_access,
+                dot_field_access,
+                arrow_field_access,
+            } => {
                 varinscope(&name)?;
                 let dind = getvarindices(&name).unwrap();
-                if indices.len() > dind.len() {
+                if array_access.len() > dind.len() {
                     return Err("Index dimension error for variable [".to_owned()
                         + name.as_str()
                         + "]");
                 }
-                for ei in 0..indices.len() {
-                    if let Some(ei_type) = indices[ei].getexprtype() {
+                //validate array access
+                for ei in 0..array_access.len() {
+                    array_access[ei].validate()?;
+                    if let Some(ei_type) = array_access[ei].getexprtype() {
                         match ei_type {
                             ASTExprType::Primitive(PrimitiveType::Int) => {
                                 continue;
@@ -62,6 +97,84 @@ impl ASTNode {
                             + name.as_str()
                             + "] at "
                             + "[]".repeat(ei).as_str());
+                    }
+                }
+
+                let mut currtype: ASTExprType = getvartype(name).unwrap();
+
+                for _ in 0..array_access.len() {
+                    currtype = currtype.derefr().unwrap();
+                }
+                // check if dot field type is
+                let mut dotptr = &mut **dot_field_access;
+                let mut arrowptr = &mut **arrow_field_access;
+                loop {
+                    if dotptr == &ASTNode::Null && arrowptr == &ASTNode::Null {
+                        break;
+                    }
+                    if dotptr != &ASTNode::Null {
+                        if let ASTNode::VAR {
+                            name: nname,
+                            array_access,
+                            dot_field_access,
+                            arrow_field_access,
+                        } = dotptr
+                        {
+                            if array_access.len() > 0 {
+                                return Err(
+                                    "Arrays inside struct is not implemented yet!".to_owned()
+                                );
+                            }
+                            currtype.get_field_id(&nname)?;
+                            //validate_field_array_access(nname, &currtype, array_access)?;
+
+                            currtype = currtype.get_field_type(nname)?;
+                            for _ in 0..array_access.len() {
+                                currtype = currtype.derefr().unwrap();
+                            }
+                            //get next field type
+                            dotptr = &mut **dot_field_access;
+                            arrowptr = &mut **arrow_field_access;
+                            continue;
+                        } else {
+                            return Err("Dot operator can only be used to access [struct_t] types"
+                                .to_owned());
+                        }
+                    }
+                    // check if dot field type is
+                    if arrowptr != &ASTNode::Null {
+                        if let ASTNode::VAR {
+                            name: nname,
+                            array_access,
+                            dot_field_access,
+                            arrow_field_access,
+                        } = arrowptr
+                        {
+                            if array_access.len() > 0 {
+                                return Err(
+                                    "Arrays inside struct is not implemented yet!".to_owned()
+                                );
+                            }
+                            if let ASTExprType::Pointer(etype) = &currtype {
+                                etype.get_field_id(&nname)?;
+                                currtype = etype.get_field_type(nname)?;
+                                for _ in 0..array_access.len() {
+                                    currtype = currtype.derefr().unwrap();
+                                }
+                                dotptr = &mut **dot_field_access;
+                                arrowptr = &mut **arrow_field_access;
+                                continue;
+                            } else {
+                                return Err("Dot operator expects a variable name".to_owned());
+                            }
+                            //TODO validate array access
+                            //validate_field_array_access(nname, &currtype, array_access)?;
+                        } else {
+                            return Err(
+                                "Arrow operator can only be used to access [struct_t*] types"
+                                    .to_owned(),
+                            );
+                        }
                     }
                 }
                 Ok(())
@@ -133,9 +246,14 @@ impl ASTNode {
                 ASTNodeType::Ref => {
                     ptr.validate()?;
                     match &**ptr {
-                        ASTNode::VAR { name, indices } => {
+                        ASTNode::VAR {
+                            name,
+                            array_access,
+                            dot_field_access,
+                            arrow_field_access,
+                        } => {
                             let varindices = getvarindices(name).unwrap();
-                            if indices.len() != varindices.len() {
+                            if array_access.len() != varindices.len() {
                                 return Err("Reference operator can only reference to the basetype of an array.".to_owned());
                             }
                             Ok(())
@@ -148,7 +266,9 @@ impl ASTNode {
                     match &**ptr {
                         ASTNode::VAR {
                             name: _,
-                            indices: _,
+                            array_access: _,
+                            dot_field_access: _,
+                            arrow_field_access: _,
                         } => Ok(()),
                         ASTNode::INT(_) => Ok(()),
                         ASTNode::STR(_) => Ok(()),
@@ -185,6 +305,8 @@ impl ASTNode {
                 rhs,
             } => match op {
                 ASTNodeType::Equals => {
+                    lhs.validate()?;
+                    rhs.validate()?;
                     let lhs_t = lhs.getexprtype();
                     let rhs_t = rhs.getexprtype();
 
@@ -294,10 +416,70 @@ impl ASTNode {
             },
             ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
             ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
-            ASTNode::VAR { name, indices } => {
+            ASTNode::VAR {
+                name,
+                array_access,
+                dot_field_access,
+                arrow_field_access,
+            } => {
                 if let Some(mut vtype) = getvartype(&name) {
-                    for _ in 0..indices.len() {
+                    for _ in 0..array_access.len() {
                         vtype = vtype.derefr().unwrap();
+                    }
+                    let mut dotptr = &**dot_field_access;
+                    let mut arrowptr = &**arrow_field_access;
+                    loop {
+                        if dotptr == &ASTNode::Null && arrowptr == &ASTNode::Null {
+                            break;
+                        }
+                        if dotptr != &ASTNode::Null {
+                            if let ASTNode::VAR {
+                                name: nname,
+                                array_access: _,
+                                dot_field_access,
+                                arrow_field_access,
+                            } = dotptr
+                            {
+                                if array_access.len() > 0 {
+                                    exit_on_err(
+                                        "Arrays inside structs are not implemented yet.".to_owned(),
+                                    );
+                                }
+                                if let Err(e) = vtype.get_field_id(nname) {
+                                    exit_on_err(e.to_owned());
+                                }
+                                vtype = vtype.get_field_type(nname).unwrap();
+                                dotptr = &**dot_field_access;
+                                arrowptr = &**arrow_field_access;
+                            }
+                        }
+                        if arrowptr != &ASTNode::Null {
+                            if let ASTNode::VAR {
+                                name: nname,
+                                array_access,
+                                dot_field_access,
+                                arrow_field_access,
+                            } = arrowptr
+                            {
+                                if array_access.len() > 0 {
+                                    exit_on_err(
+                                        "Arrays inside structs are not implemented yet.".to_owned(),
+                                    );
+                                }
+                                if let ASTExprType::Pointer(etype) = &vtype {
+                                    if let Err(e) = etype.get_field_id(&nname) {
+                                        exit_on_err(e.to_owned());
+                                    }
+                                    vtype = etype.get_field_type(nname).unwrap();
+                                    dotptr = &**dot_field_access;
+                                    arrowptr = &**arrow_field_access;
+                                } else {
+                                    exit_on_err(
+                                        "Arrow operator expects a variable of struct_t*".to_owned(),
+                                    );
+                                }
+                            }
+                        }
                     }
                     return Some(vtype);
                 } else {
