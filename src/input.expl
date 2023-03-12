@@ -25,10 +25,12 @@ int main(){
 		ss ins;
 		ss* bns;
 		node q;
+		node p;
 		node* g;
 	enddecl
 	begin
 		q.noder->noder->noder->leaf.b = 5;
+		p= q;
 		return 0;
 	end
 }

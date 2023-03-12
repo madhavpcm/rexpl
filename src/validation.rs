@@ -305,8 +305,6 @@ impl ASTNode {
                 rhs,
             } => match op {
                 ASTNodeType::Equals => {
-                    lhs.validate()?;
-                    rhs.validate()?;
                     let lhs_t = lhs.getexprtype();
                     let rhs_t = rhs.getexprtype();
 

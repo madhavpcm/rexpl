@@ -141,6 +141,18 @@ fn __restore_register(file: &File, safe_register: usize) {
     std::mem::drop(registers);
     //reset to not used
 }
+fn __copy_struct(mut file: &File, name: &String, left_register: usize, right_register: usize) {
+    if let ASTExprType::Struct(s) = getvartype(name).unwrap() {
+        for _ in 0..s.size - 1 {
+            write_line(
+                file,
+                format_args!("MOV [R{}], R{}", left_register, right_register),
+            );
+            write_line(file, format_args!("ADD R{}, 1", left_register));
+            write_line(file, format_args!("ADD R{}, 1", right_register));
+        }
+    }
+}
 fn __load_variable(mut file: &File, vname: &String) -> usize {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
@@ -507,6 +519,33 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Equals => {
                     let left_register: usize = __code_gen(lhs, file, true).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
+                    match &**lhs {
+                        ASTNode::VAR {
+                            name,
+                            array_access: _,
+                            dot_field_access: _,
+                            arrow_field_access: _,
+                        } => {
+                            __copy_struct(file, name, left_register, right_register);
+                        }
+                        ASTNode::UnaryNode {
+                            op: _,
+                            exprtype: _,
+                            ptr,
+                            depth: _,
+                        } => {
+                            if let ASTNode::VAR {
+                                name,
+                                array_access: _,
+                                dot_field_access: _,
+                                arrow_field_access: _,
+                            } = &**ptr
+                            {
+                                __copy_struct(file, name, left_register, right_register);
+                            }
+                        }
+                        _ => exit_on_err("This shouldnt happen.".to_owned()),
+                    }
                     write_line(
                         file,
                         format_args!("MOV [R{}], R{}", left_register, right_register),

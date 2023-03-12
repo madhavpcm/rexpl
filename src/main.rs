@@ -1,6 +1,7 @@
 // TODO call to undefined functions
 // TODO Strict Ownership things for type system
 // TODO user types and function name check
+// TODO Deref for expressions dot arrow lists
 use env_logger::{Builder, Env};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
