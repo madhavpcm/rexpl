@@ -2,6 +2,7 @@ type
 	ss {
 		int a;
 		int b;
+		int* d;
 		ss* c;
 	};
 	node {
@@ -23,6 +24,7 @@ int main(){
 		int *c;
 		int **b;
 		ss ins;
+		ss ss;
 		ss* bns;
 		node q;
 		node p;
@@ -31,6 +33,7 @@ int main(){
 	begin
 		q.noder->noder->noder->leaf.b = 5;
 		p= q;
+		a = a * *bns->d;
 		return 0;
 	end
 }

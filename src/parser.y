@@ -124,9 +124,10 @@ Start -> Result<ASTNode,String>:
 	TypeDefBlock GDeclBlock FDefBlock MainBlock
 	{
 		$1?;
+		$2?;
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			lhs : Box::new($3?),
 			rhs : Box::new($4?),
 		})
@@ -136,9 +137,9 @@ Start -> Result<ASTNode,String>:
 		$1?;
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			lhs : Box::new($3?),
-			rhs : Box::new(ASTNode::Null),
+			rhs : Box::new(ASTNode::Void),
 		})
 	}
 	;
@@ -170,18 +171,17 @@ BeginBlock -> Result<ASTNode,String>:
 	}
 	| "BEGIN" "END" 
 	{
-		Ok(ASTNode::Null)
+		Ok(ASTNode::Void)
 	}
 	|
 	{
-		Ok(ASTNode::Null)
+		Ok(ASTNode::Void)
 	}
 	;
 GDeclBlock -> Result<(),String>:
 	"DECL" GDeclList "ENDDECL" 
 	{
-		$2?;
-		Ok(())
+		$2
 	}
 	| "DECL" "ENDDECL" 
 	{
@@ -315,7 +315,7 @@ FBlock -> Result<ASTNode,String>:
 	}
 	|
 	{
-		Ok(ASTNode::Null)
+		Ok(ASTNode::Void)
 	}
 	;
 FDefBlock -> Result<ASTNode,String>:
@@ -323,7 +323,7 @@ FDefBlock -> Result<ASTNode,String>:
 	{
 		Ok(ASTNode::BinaryNode{
 			op: ASTNodeType::Connector,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			lhs: Box::new($1?),
 			rhs: Box::new($2?),
 		})
@@ -337,6 +337,7 @@ FDef ->Result<ASTNode,String>:
 	FType 'VAR' '(' ParamListBlock ')' '{' LDeclBlock BeginBlock '}'
 	{
 		let v = $2.map_err(|_| "VAR Err".to_string())?; 
+		$7?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
 		let paramlist_ = $4?;
 		let mut node = ASTNode::FuncDefNode{
@@ -356,7 +357,7 @@ FDef ->Result<ASTNode,String>:
 			lst.clone()
 		);
 		//reset data structures
-		lst.clear();
+		(*lst).clear();
 		*lv = 1;
 		std::mem::drop(lv);
 		std::mem::drop(lst);
@@ -365,15 +366,18 @@ FDef ->Result<ASTNode,String>:
 	}
 	;
 
-LDeclBlock -> ():
+LDeclBlock -> Result<(),String>:
 	"DECL" LDeclList "ENDDECL"
 	{
+		$2
 	}
 	| "DECL" "ENDDECL"
 	{
+		Ok(())
 	}
 	|
 	{
+		Ok(())
 	}
 	;
 
@@ -468,7 +472,7 @@ StmtList -> Result<ASTNode, String>:
 	{
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			lhs : Box::new($1?),
 			rhs : Box::new($2?),
 		})
@@ -519,6 +523,17 @@ Stmt -> Result<ASTNode,String>:
 		node.validate()?;
 		Ok(node)
 	}
+	| "INIT" '(' ')' ';'
+	{
+		let mut node = ASTNode::UnaryNode{
+			op: ASTNodeType::Initialize,
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Void)),
+			ptr: Box::new(ASTNode::Void),
+			depth: None,
+		};
+		node.validate()?;
+		Ok(node)
+	}
 	;
 WhileStmt -> Result<ASTNode,String>:
     "WHILE" '(' Expr ')' "DO" StmtList "ENDWHILE" ';'
@@ -554,41 +569,33 @@ OutputStmt -> Result<ASTNode,String>:
 	{
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Write,
-			exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+			exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			ptr : Box::new($3?),
 			depth : None,
 		})
 	}
 	;
 AssgStmt -> Result<ASTNode,String>:
-	Variable '=' Expr ';'
+	VariableExpr '=' Expr ';'
 	{
 		let lhs = $1?;
 		let rhs = $3?;
 		let mut node = ASTNode::BinaryNode{
 			op : ASTNodeType::Equals,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
+            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			lhs : Box::new(lhs),
 			rhs : Box::new(rhs),
 		};
 		node.validate()?;
 		Ok(node)
 	}
-	| PtrPtr Variable '=' Expr ';'
+	| VariableExpr '=' 'ALLOC' '(' ')' ';'
 	{
-	//TODO
-		let lhs = $2?;
-		let rhs = $4?;
-		let mut node = ASTNode::BinaryNode{
-			op : ASTNodeType::Equals,
-            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Null)),
-			lhs : Box::new(ASTNode::UnaryNode{
-				op: ASTNodeType::Deref,
-				exprtype: None,
-				ptr: Box::new(lhs),
-				depth: Some($1?.depth()),
-			}),
-			rhs : Box::new(rhs),
+		let mut node = ASTNode::UnaryNode{
+			op: ASTNodeType::Alloc,
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Void)),
+			ptr : Box::new($1?),
+			depth: None
 		};
 		node.validate()?;
 		Ok(node)
@@ -599,7 +606,7 @@ InputStmt -> Result<ASTNode, String> :
 	{
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Read,
-			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Null)),
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			ptr : Box::new($3?),
 			depth: None
 		})
@@ -609,7 +616,7 @@ InputStmt -> Result<ASTNode, String> :
 		let var = $4?;
 		Ok(ASTNode::UnaryNode{
 			op : ASTNodeType::Read,
-			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Null)),
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Void)),
 			ptr : Box::new(ASTNode::UnaryNode{
 				op: ASTNodeType::Deref,
 				exprtype: None,
@@ -785,7 +792,17 @@ Expr -> Result<ASTNode,String>:
 	{
 		$1
 	}
-	| 'VAR' '(' ')'
+	| FuncCall
+	{
+		$1
+	}
+	| 'NULL'
+	{
+		Ok(ASTNode::Null)
+	}
+	;
+FuncCall -> Result<ASTNode, String>:
+	'VAR' '(' ')'
 	{
 		let v = $1.map_err(|_| "VAR()".to_string())?;
 		let functionname= parse_string($lexer.span_str(v.span())).unwrap();
@@ -807,8 +824,25 @@ Expr -> Result<ASTNode,String>:
 		node.validate()?;
 		Ok(node)
 	}
+	| StdFuncCall
+	{
+		$1
+	}
     ; 
 
+StdFuncCall -> Result<ASTNode,String>:
+	'FREE' '(' VariableExpr ')'
+	{
+		let mut node = ASTNode::UnaryNode{
+			op: ASTNodeType::Free,
+			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Int)),
+			ptr: Box::new($3?),
+			depth: None,
+		};
+		node.validate()?;
+		Ok(node)
+	}
+	;
 //Variables around the code
 Variable -> Result<ASTNode,String>:
 	'VAR'
@@ -818,8 +852,8 @@ Variable -> Result<ASTNode,String>:
 		Ok(ASTNode::VAR{
 			name: var,
 			array_access: Vec::default(),
-			dot_field_access: Box::new(ASTNode::Null),
-			arrow_field_access: Box::new(ASTNode::Null),
+			dot_field_access: Box::new(ASTNode::Void),
+			arrow_field_access: Box::new(ASTNode::Void),
 		})
 	}
 	| 'VAR' VariableArray
@@ -829,8 +863,8 @@ Variable -> Result<ASTNode,String>:
 		Ok(ASTNode::VAR{
 			name: var,
 			array_access: $2?,
-			dot_field_access: Box::new(ASTNode::Null),
-			arrow_field_access: Box::new(ASTNode::Null),
+			dot_field_access: Box::new(ASTNode::Void),
+			arrow_field_access: Box::new(ASTNode::Void),
 		})
 	}
 	| 'VAR' 'DOT' Variable
@@ -841,7 +875,7 @@ Variable -> Result<ASTNode,String>:
 			name: var,
 			array_access: vec![],
 			dot_field_access: Box::new($3?),
-			arrow_field_access: Box::new(ASTNode::Null),
+			arrow_field_access: Box::new(ASTNode::Void),
 		})
 	}
 	| 'VAR' 'ARROW' Variable
@@ -851,7 +885,7 @@ Variable -> Result<ASTNode,String>:
 		Ok(ASTNode::VAR{
 			name: var,
 			array_access: vec![],
-			dot_field_access: Box::new(ASTNode::Null),
+			dot_field_access: Box::new(ASTNode::Void),
 			arrow_field_access: Box::new($3?),
 		})
 	}
@@ -904,7 +938,7 @@ VariableExpr -> Result<ASTNode,String>:
 		node.validate()?;
 		Ok(node)
 	}
-	| PtrPtr Variable
+	| PtrPtr Variable 
 	{
 		let mut node = ASTNode::UnaryNode{
 			op: ASTNodeType::Deref,

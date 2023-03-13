@@ -109,10 +109,10 @@ impl ASTNode {
                 let mut dotptr = &mut **dot_field_access;
                 let mut arrowptr = &mut **arrow_field_access;
                 loop {
-                    if dotptr == &ASTNode::Null && arrowptr == &ASTNode::Null {
+                    if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
                         break;
                     }
-                    if dotptr != &ASTNode::Null {
+                    if dotptr != &ASTNode::Void {
                         if let ASTNode::VAR {
                             name: nname,
                             array_access,
@@ -142,7 +142,7 @@ impl ASTNode {
                         }
                     }
                     // check if dot field type is
-                    if arrowptr != &ASTNode::Null {
+                    if arrowptr != &ASTNode::Void {
                         if let ASTNode::VAR {
                             name: nname,
                             array_access,
@@ -232,9 +232,36 @@ impl ASTNode {
                 ptr,
                 depth,
             } => match op {
+                ASTNodeType::Free => {
+                    if let Some(ASTExprType::Pointer(p)) = ptr.getexprtype() {
+                        Ok(())
+                    } else {
+                        Err("Free expects a pointer type.".to_owned())
+                    }
+                }
+                ASTNodeType::Initialize => {
+                    if *INITFLAG.lock().unwrap() {
+                        return Err("Initialize should only be called once".to_owned());
+                    }
+                    *INITFLAG.lock().unwrap() = true;
+                    Ok(())
+                }
+                ASTNodeType::Alloc => match &**ptr {
+                    ASTNode::VAR {
+                        name,
+                        array_access,
+                        dot_field_access,
+                        arrow_field_access,
+                    } => {
+                        if let Some(ASTExprType::Pointer(p)) = ptr.getexprtype() {
+                            Ok(())
+                        } else {
+                            Err("Alloc can only be used on pointer types.".to_owned())
+                        }
+                    }
+                    _ => Err("Alloc expects a declared variable.".to_owned()),
+                },
                 ASTNodeType::Deref => {
-                    ptr.validate()?;
-
                     if let Some(ptrtype) = ptr.getexprtype() {
                         if ptrtype.depth() < depth.unwrap() {
                             return Err("Dereferencing non pointer type.".to_owned());
@@ -243,24 +270,21 @@ impl ASTNode {
                     self.getexprtype();
                     Ok(())
                 }
-                ASTNodeType::Ref => {
-                    ptr.validate()?;
-                    match &**ptr {
-                        ASTNode::VAR {
-                            name,
-                            array_access,
-                            dot_field_access,
-                            arrow_field_access,
-                        } => {
-                            let varindices = getvarindices(name).unwrap();
-                            if array_access.len() != varindices.len() {
-                                return Err("Reference operator can only reference to the basetype of an array.".to_owned());
-                            }
-                            Ok(())
+                ASTNodeType::Ref => match &**ptr {
+                    ASTNode::VAR {
+                        name,
+                        array_access,
+                        dot_field_access,
+                        arrow_field_access,
+                    } => {
+                        let varindices = getvarindices(name).unwrap();
+                        if array_access.len() != varindices.len() {
+                            return Err("Reference operator can only reference to the basetype of an array.".to_owned());
                         }
-                        _ => Err("Reference operator expects a declared variable.".to_owned()),
+                        Ok(())
                     }
-                }
+                    _ => Err("Reference operator expects a declared variable.".to_owned()),
+                },
                 ASTNodeType::Write => {
                     ptr.validate()?;
                     match &**ptr {
@@ -311,7 +335,13 @@ impl ASTNode {
                     if lhs_t == rhs_t {
                         Ok(())
                     } else {
-                        Err("Assignment of invalid type.".to_owned())
+                        match (lhs_t, rhs_t) {
+                            (
+                                Some(ASTExprType::Pointer(..)),
+                                Some(ASTExprType::Primitive(PrimitiveType::Null)),
+                            ) => Ok(()),
+                            _ => Err("Assignment of invalid type.".to_owned()),
+                        }
                     }
                 }
                 ASTNodeType::Gt
@@ -332,7 +362,7 @@ impl ASTNode {
                 | ASTNodeType::Slash
                 | ASTNodeType::Mod => {
                     let expr = self.getexprtype();
-                    if expr != None && expr != Some(ASTExprType::Primitive(PrimitiveType::Null)) {
+                    if expr != None && expr != Some(ASTExprType::Primitive(PrimitiveType::Void)) {
                         Ok(())
                     } else {
                         Err("Operator +-/*% got invalid types.".to_owned())
@@ -409,9 +439,10 @@ impl ASTNode {
             ASTNode::ErrorNode { err } => match err {
                 ASTError::TypeError(s) => {
                     exit_on_err(s.to_owned());
-                    Some(ASTExprType::Primitive(PrimitiveType::Null))
+                    Some(ASTExprType::Primitive(PrimitiveType::Void))
                 }
             },
+            ASTNode::Null => Some(ASTExprType::Primitive(PrimitiveType::Null)),
             ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
             ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
             ASTNode::VAR {
@@ -427,10 +458,10 @@ impl ASTNode {
                     let mut dotptr = &**dot_field_access;
                     let mut arrowptr = &**arrow_field_access;
                     loop {
-                        if dotptr == &ASTNode::Null && arrowptr == &ASTNode::Null {
+                        if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
                             break;
                         }
-                        if dotptr != &ASTNode::Null {
+                        if dotptr != &ASTNode::Void {
                             if let ASTNode::VAR {
                                 name: nname,
                                 array_access: _,
@@ -451,7 +482,7 @@ impl ASTNode {
                                 arrowptr = &**arrow_field_access;
                             }
                         }
-                        if arrowptr != &ASTNode::Null {
+                        if arrowptr != &ASTNode::Void {
                             if let ASTNode::VAR {
                                 name: nname,
                                 array_access,
@@ -514,7 +545,7 @@ impl ASTNode {
                         exprtype.clone()
                     }
                 }
-                _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
+                _ => Some(ASTExprType::Primitive(PrimitiveType::Void)),
             },
             ASTNode::BinaryNode {
                 op,
@@ -545,8 +576,20 @@ impl ASTNode {
 
                         *exprtype = match (lhs_t, rhs_t) {
                             (
+                                ASTExprType::Primitive(PrimitiveType::Null),
+                                ASTExprType::Pointer(..),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (
+                                ASTExprType::Pointer(..),
+                                ASTExprType::Primitive(PrimitiveType::Null),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (
+                                ASTExprType::Primitive(PrimitiveType::String),
+                                ASTExprType::Primitive(PrimitiveType::String),
                             ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
                             (ASTExprType::Pointer(ptr1), ASTExprType::Pointer(ptr2)) => {
                                 if ptr1.depth() == ptr2.depth()
@@ -606,7 +649,7 @@ impl ASTNode {
                         exprtype.clone()
                     }
                 }
-                _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
+                _ => Some(ASTExprType::Primitive(PrimitiveType::Void)),
             },
             ASTNode::FuncCallNode { fname, arglist: _ } => {
                 let gst = GLOBALSYMBOLTABLE.lock().unwrap();

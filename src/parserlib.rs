@@ -12,7 +12,7 @@ lazy_static! {
     pub static ref FUNCTION_TABLE: Mutex<HashMap<String, HashMap<String, LSymbol>>> =
         Mutex::new(HashMap::default());
     pub static ref GLOBALSYMBOLTABLE: Mutex<HashMap<String, GSymbol>> =
-        Mutex::new(HashMap::default());
+        Mutex::new(GlobalSymbolTable::default().table);
     pub static ref LOCALVARID: Mutex<i64> = Mutex::new(1);
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
     pub static ref LOCALSYMBOLTABLE: Mutex<HashMap<String, LSymbol>> =
@@ -21,9 +21,75 @@ lazy_static! {
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
     pub static ref DECL_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
+    pub static ref INITFLAG: Mutex<bool> = Mutex::new(false);
 }
 pub struct TypeTable {
     pub table: HashMap<String, ASTExprType>,
+}
+pub struct GlobalSymbolTable {
+    pub table: HashMap<String, GSymbol>,
+}
+impl Default for GlobalSymbolTable {
+    fn default() -> GlobalSymbolTable {
+        let mut table: HashMap<String, GSymbol> = HashMap::default();
+        table.insert(
+            "write".to_owned(),
+            GSymbol::Func {
+                ret_type: ASTExprType::Primitive(PrimitiveType::Int),
+                paramlist: (LinkedList::from(VarNode {
+                    varname: "var".to_owned(),
+                    vartype: ASTExprType::Primitive(PrimitiveType::Int),
+                    varindices: vec![],
+                })),
+                flabel: (0),
+            },
+        );
+        table.insert(
+            "read".to_owned(),
+            GSymbol::Func {
+                ret_type: ASTExprType::Primitive(PrimitiveType::Int),
+                paramlist: (LinkedList::from(VarNode {
+                    varname: "var".to_owned(),
+                    vartype: ASTExprType::Primitive(PrimitiveType::Int),
+                    varindices: vec![],
+                })),
+                flabel: (0),
+            },
+        );
+        table.insert(
+            "free".to_owned(),
+            GSymbol::Func {
+                ret_type: ASTExprType::Pointer(Box::new(ASTExprType::Primitive(
+                    PrimitiveType::Void,
+                ))),
+                paramlist: (LinkedList::from(VarNode {
+                    varname: "ptr".to_owned(),
+                    vartype: ASTExprType::Primitive(PrimitiveType::Int),
+                    varindices: vec![],
+                })),
+                flabel: (0),
+            },
+        );
+        table.insert(
+            "initialize".to_owned(),
+            GSymbol::Func {
+                ret_type: ASTExprType::Primitive(PrimitiveType::Void),
+                paramlist: (LinkedList::default()),
+                flabel: (0),
+            },
+        );
+        table.insert(
+            "alloc".to_owned(),
+            GSymbol::Func {
+                ret_type: ASTExprType::Pointer(Box::new(ASTExprType::Primitive(
+                    PrimitiveType::Void,
+                ))),
+                paramlist: (LinkedList::default()),
+                flabel: (0),
+            },
+        );
+        GlobalSymbolTable { table: (table) }
+    }
 }
 impl Default for TypeTable {
     fn default() -> TypeTable {
@@ -43,6 +109,14 @@ impl TypeTable {
             Ok(entry.clone())
         } else {
             Err("Type [".to_owned() + tname.as_str() + "] is not declared/valid.")
+        }
+    }
+    pub fn tt_exists(&self, tname: &String) -> bool {
+        let table = &self.table;
+        if let Some(entry) = table.get(tname) {
+            true
+        } else {
+            false
         }
     }
     pub fn tinstall(&mut self, tname: String, tfields: LinkedList<Field>) -> Result<(), String> {
@@ -140,6 +214,10 @@ pub enum ASTNodeType {
     //IO
     Read,
     Write,
+    //Heap
+    Alloc,
+    Free,
+    Initialize,
     //Connector/Blank Node
     Connector,
     //Pointers
@@ -199,6 +277,14 @@ impl FieldType {
     }
 }
 impl ASTExprType {
+    pub fn size(&self) -> Result<usize, String> {
+        match self {
+            ASTExprType::Primitive(_) => Ok(1),
+            ASTExprType::Pointer(_) => Ok(1),
+            ASTExprType::Struct(s) => Ok(s.size),
+            ASTExprType::Error => Err("This shouldn't happen.".to_owned()),
+        }
+    }
     pub fn get_field_type(&self, fname: &String) -> Result<ASTExprType, String> {
         match self {
             ASTExprType::Struct(s) => {
@@ -370,6 +456,13 @@ impl VarNode {
         Self::validate_locality(self);
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         let mut varid = LOCALVARID.lock().unwrap();
+        if TYPE_TABLE.lock().unwrap().tt_exists(&self.varname) == true {
+            exit_on_err(
+                "Name [".to_owned()
+                    + self.varname.as_str()
+                    + "]  exists as a user defined type and cannot be used to declare a local variable.",
+            );
+        }
 
         lst.insert(
             self.varname.clone(),
@@ -389,6 +482,13 @@ impl VarNode {
         let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
         let mut varid = VARID.lock().unwrap();
         //check if this is already  used
+        if TYPE_TABLE.lock().unwrap().tt_exists(&self.varname) == true {
+            exit_on_err(
+                "Name [".to_owned()
+                    + self.varname.as_str()
+                    + "]  exists as a user defined type and cannot be used to declare a global variable.",
+            );
+        }
         if gst.contains_key(self.varname.as_str()) {
             exit_on_err(
                 "Global symbol [".to_owned() + self.varname.as_str() + "] is already declared.",
@@ -423,8 +523,15 @@ pub fn install_func_to_gst(
     let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
     let mut label_count = LABEL_COUNT.lock().unwrap();
     //check if this is already  used
+    if TYPE_TABLE.lock().unwrap().tt_exists(&funcname) == true {
+        exit_on_err(
+            "Name [".to_owned()
+                + funcname.as_str()
+                + "]  exists as a user defined type and cannot be used to declare a function.",
+        );
+    }
     if gst.contains_key(funcname.as_str()) {
-        exit_on_err("Global symbol + ".to_owned() + funcname.as_str() + " is already declared.")
+        exit_on_err("Global symbol [".to_owned() + funcname.as_str() + "] is already declared.")
     }
     gst.insert(
         funcname,
@@ -493,6 +600,7 @@ pub enum ASTNode {
     BreakNode,
     BreakpointNode,
     ContinueNode,
+    Void,
     Null,
 }
 impl From<ASTNode> for LinkedList<ASTNode> {
@@ -567,26 +675,27 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
 /*
  * Function to insert parameter list to local symbol table
  */
-pub fn __lst_install_params(paramlist: &mut LinkedList<VarNode>) {
+pub fn __lst_install_params(paramlist: &mut LinkedList<VarNode>) -> Result<(), String> {
     //Check if this variable is in Global Symbol Table
     let mut localid = -3;
     for param in paramlist.iter_mut() {
         param.validate_locality();
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+        let mut siz = param.vartype.size()?;
+        for i in &param.varindices {
+            siz *= i;
+        }
         lst.insert(
             param.varname.clone(),
             LSymbol::Var {
                 vartype: (param.vartype.clone()),
-                varid: (localid),
+                varid: (localid - (i64::try_from(siz).unwrap() - 1)),
                 varindices: (param.varindices.clone()),
             },
         );
-        let mut siz = 1;
-        for i in &param.varindices {
-            siz *= i;
-        }
         localid -= i64::try_from(siz).unwrap();
     }
+    Ok(())
 }
 pub fn __parse_debug() {
     log::warn!("Im here");

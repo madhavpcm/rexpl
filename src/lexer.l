@@ -24,6 +24,10 @@ str "STR_T"
 int "INT_T"
 type "TYPE"
 endtype "ENDTYPE"
+alloc "ALLOC"
+free "FREE"
+null|NULL 'NULL'
+initialize "INIT"
 
 [.] "DOT"
 -> "ARROW"
