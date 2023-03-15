@@ -1,0 +1,64 @@
+decl
+	int a[3][3], b[3][3], c[3][3];
+	int i,j,k;
+	int n;
+enddecl
+
+int main() {
+decl
+enddecl
+begin
+	i=0;
+	j=0;
+	k=0;
+	read(n);
+
+	while( i <n) do
+		j=0;
+		while(j <n) do
+			read(a[i][j]);
+			j=j+1;
+		endwhile;
+	i=i+1;
+	endwhile;
+
+	i=0;
+	j=0;
+	while( i <n) do
+		j=0;
+		while(j <n) do
+			read(b[i][j]);
+			j=j+1;
+		endwhile;
+	i=i+1;
+	endwhile;
+
+	i=0;
+	j=0;
+	while(i <n) do
+		j=0;
+		while(j <n) do
+			k=0;
+			c[i][j] =0;
+			while(k <n) do
+				c[i][j] = c[i][j] + a[i][k] * b[k][j];
+				k=k+1;
+			endwhile;
+			j=j+1;
+		endwhile;
+		i=i+1;
+	endwhile;
+
+	i=0;
+	j=0;
+	while( i <n) do
+		j=0;
+		while(j <n) do
+			write(c[i][j]);
+			j=j+1;
+		endwhile;
+	i=i+1;
+	endwhile;
+end
+
+}
