@@ -1,15 +1,39 @@
+type
+	ss {
+		int a;
+		int b;
+		int* d;
+		ss* c;
+	};
+	node {
+		ss leaf;
+		ss* tree;
+		node* noder;
+	};
+endtype
+
 decl
 	int foo(int b, int c, int d);
+	ss* ins;
 enddecl
 
 int main(){
 	decl
 		int e[10][10],i;
+		int a;
 		int *c;
 		int **b;
+		ss ins;
+		ss ss;
+		ss* bns;
+		node q;
+		node p;
+		node* g;
 	enddecl
 	begin
-		c = e[1];
+		q.noder->noder->noder->leaf.b = 5;
+		p= q;
+		a = a * *bns->d;
 		return 0;
 	end
 }

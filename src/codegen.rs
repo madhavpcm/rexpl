@@ -126,7 +126,7 @@ fn __get_safe_register() -> usize {
     0
 }
 //function to restore register context
-fn __restore_register(file: &File, safe_register: usize) {
+fn __restore_registers(file: &File, safe_register: usize) {
     let mut rs = REGISTER_STACK.lock().unwrap();
     let mut registers = rs.last().unwrap().clone();
     for i in (0..MAX_REGISTERS).rev() {
@@ -140,6 +140,18 @@ fn __restore_register(file: &File, safe_register: usize) {
     *reg = registers.clone();
     std::mem::drop(registers);
     //reset to not used
+}
+fn __copy_struct(file: &File, name: &String, left_register: usize, right_register: usize) {
+    if let ASTExprType::Struct(s) = getvartype(name).unwrap() {
+        for _ in 0..s.size - 1 {
+            write_line(
+                file,
+                format_args!("MOV [R{}], R{}", left_register, right_register),
+            );
+            write_line(file, format_args!("ADD R{}, 1", left_register));
+            write_line(file, format_args!("ADD R{}, 1", right_register));
+        }
+    }
 }
 fn __load_variable(mut file: &File, vname: &String) -> usize {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -211,7 +223,12 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             registers[register].1 = *n;
             register
         }
-        ASTNode::VAR { name, indices } => {
+        ASTNode::VAR {
+            name,
+            array_access: indices,
+            dot_field_access,
+            arrow_field_access,
+        } => {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
@@ -242,6 +259,59 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 std::mem::drop(registers);
                 //Free this for reuse
                 free_reg(offsetreg);
+            }
+            let mut dotptr = &**dot_field_access;
+            let mut arrowptr = &**arrow_field_access;
+            let mut currtype = getvartype(name).unwrap();
+            for _ in 0..indices.len() {
+                currtype = currtype.derefr().unwrap();
+            }
+            loop {
+                if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
+                    break;
+                }
+                if dotptr != &ASTNode::Void {
+                    if let ASTNode::VAR {
+                        name: nname,
+                        array_access: _,
+                        dot_field_access,
+                        arrow_field_access,
+                    } = dotptr
+                    {
+                        let field_offset = currtype.get_field_id(nname).unwrap();
+                        currtype = currtype.get_field_type(nname).unwrap();
+                        write_line(file, format_args!("ADD R{}, {}", baseaddrreg, field_offset));
+                        dotptr = &**dot_field_access;
+                        arrowptr = &**arrow_field_access;
+                        continue;
+                    }
+                }
+                // check if dot field type is
+                if arrowptr != &ASTNode::Void {
+                    if let ASTNode::VAR {
+                        name: nname,
+                        array_access: _,
+                        dot_field_access,
+                        arrow_field_access,
+                    } = arrowptr
+                    {
+                        if let ASTExprType::Pointer(etype) = &currtype {
+                            write_line(
+                                file,
+                                format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
+                            );
+                            let field_offset = etype.get_field_id(nname).unwrap();
+                            currtype = etype.get_field_type(nname).unwrap();
+                            write_line(
+                                file,
+                                format_args!("ADD R{}, {}", baseaddrreg, field_offset),
+                            );
+                            dotptr = &**dot_field_access;
+                            arrowptr = &**arrow_field_access;
+                            continue;
+                        }
+                    }
+                }
             }
             if refr == false && varindices.len() == indices.len() {
                 write_line(
@@ -449,6 +519,33 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTNodeType::Equals => {
                     let left_register: usize = __code_gen(lhs, file, true).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
+                    match &**lhs {
+                        ASTNode::VAR {
+                            name,
+                            array_access: _,
+                            dot_field_access: _,
+                            arrow_field_access: _,
+                        } => {
+                            __copy_struct(file, name, left_register, right_register);
+                        }
+                        ASTNode::UnaryNode {
+                            op: _,
+                            exprtype: _,
+                            ptr,
+                            depth: _,
+                        } => {
+                            if let ASTNode::VAR {
+                                name,
+                                array_access: _,
+                                dot_field_access: _,
+                                arrow_field_access: _,
+                            } = &**ptr
+                            {
+                                __copy_struct(file, name, left_register, right_register);
+                            }
+                        }
+                        _ => exit_on_err("This shouldnt happen.".to_owned()),
+                    }
                     write_line(
                         file,
                         format_args!("MOV [R{}], R{}", left_register, right_register),
@@ -468,12 +565,34 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             };
             result
         }
+        ASTNode::Null => {
+            let reg = get_reg();
+            write_line(file, format_args!("MOV R{}, \"\"", reg));
+            reg
+        }
         ASTNode::UnaryNode {
             op,
             exprtype: _,
             ptr,
             depth,
         } => match op {
+            ASTNodeType::Alloc => {
+                let mut unopt = (&**ptr).clone();
+                let mptr = __xsm_alloc_syscall(file, unopt.getexprtype().unwrap().size().unwrap());
+                let p = __code_gen(&**ptr, file, true);
+                write_line(file, format_args!("MOV [R{}], R{}", p, mptr));
+                free_reg(mptr);
+                free_reg(p);
+                0
+            }
+            ASTNodeType::Free => {
+                free_reg(__xsm_free_syscall(file, __code_gen(&**ptr, file, refr)));
+                0
+            }
+            ASTNodeType::Initialize => {
+                free_reg(__xsm_heapset_syscall(file));
+                0
+            }
             ASTNodeType::Read => {
                 __backup_registers(file);
                 let register = get_reg();
@@ -489,7 +608,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 let ret_reg = __get_safe_register();
                 write_line(file, format_args!("POP R{}", ret_reg));
                 write_line(file, format_args!("SUB SP, 4"));
-                __restore_register(file, ret_reg);
+                __restore_registers(file, ret_reg);
                 ret_reg
             }
             ASTNodeType::Write => {
@@ -507,14 +626,16 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 let ret_reg = __get_safe_register();
                 write_line(file, format_args!("POP R{}", ret_reg));
                 write_line(file, format_args!("SUB SP, 4"));
-                __restore_register(file, ret_reg);
+                __restore_registers(file, ret_reg);
                 ret_reg
             }
             ASTNodeType::Ref => {
                 match &**ptr {
                     ASTNode::VAR {
                         name: _,
-                        indices: _,
+                        array_access: _,
+                        dot_field_access: _,
+                        arrow_field_access: _,
                     } => {
                         let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
                         return regaddr;
@@ -528,7 +649,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             ASTNodeType::Deref => match &**ptr {
                 ASTNode::VAR {
                     name: _,
-                    indices: _,
+                    array_access: _,
+                    dot_field_access: _,
+                    arrow_field_access: _,
                 } => {
                     let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
                     for _i in 0..depth.unwrap() {
@@ -569,7 +692,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             //remove arguments
             write_line(file, format_args!("SUB SP, {}", (&**arglist).len()));
             //Restore live registers except_ret_reg
-            __restore_register(file, ret_reg);
+            __restore_registers(file, ret_reg);
             ret_reg
         }
         ASTNode::ReturnNode { expr } => {
@@ -790,7 +913,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 .expect("[code_gen] Write error");
             25
         }
-        ASTNode::Null => 25,
+        ASTNode::Void => 25,
     }
 }
 
@@ -837,30 +960,56 @@ fn __header_gen(mut file: &File) {
 }
 
 /*
- * Meta function to generate xsm code for Write Syscall of expos
+ * Meta function to generate xsm code for Alloc Syscall
  */
-fn __xsm_write_syscall(file: &File, var: usize) -> usize {
+fn __xsm_alloc_syscall(file: &File, size: usize) -> usize {
     __backup_registers(file);
-    let register = get_reg();
-    write_line(file, format_args!("MOV R{}, \"Write\"", register));
+    let register = __get_safe_register();
+    write_line(file, format_args!("MOV R{}, \"Alloc\"", register));
     write_line(file, format_args!("PUSH R{}", register));
-    write_line(file, format_args!("MOV R{}, -2", register));
+    write_line(file, format_args!("MOV R{}, {}", register, 8));
     write_line(file, format_args!("PUSH R{}", register));
-    write_line(file, format_args!("PUSH R{}", var));
-    write_line(file, format_args!("ADD SP,2"));
+    write_line(file, format_args!("ADD SP, 3"));
     write_line(file, format_args!("CALL 0"));
     write_line(file, format_args!("POP R{}", register));
     write_line(file, format_args!("SUB SP,4"));
-    __restore_register(file, register);
+    __restore_registers(file, register);
     register
 }
-
 /*
- * Meta function to generate xsm code for Read Syscall of expos
+ * Meta function to generate xsm code for Free Syscall
  */
-
+fn __xsm_free_syscall(file: &File, varreg: usize) -> usize {
+    __backup_registers(file);
+    let register = __get_safe_register();
+    write_line(file, format_args!("MOV R{}, \"Free\"", register));
+    write_line(file, format_args!("PUSH R{}", register));
+    write_line(file, format_args!("MOV R{}, {}", register, 8));
+    write_line(file, format_args!("PUSH R{}", register));
+    write_line(file, format_args!("ADD SP, 3"));
+    write_line(file, format_args!("CALL 0"));
+    write_line(file, format_args!("POP R{}", register));
+    write_line(file, format_args!("SUB SP,4"));
+    __restore_registers(file, register);
+    register
+}
 /*
- * Meta function to generate xsm code for Exit Syscall of expos
+ * Meta function to generate xsm code for Initialize (Heapset) Syscall
+ */
+fn __xsm_heapset_syscall(file: &File) -> usize {
+    __backup_registers(file);
+    let register = __get_safe_register();
+    write_line(file, format_args!("MOV R{}, \"Heapset\"", register));
+    write_line(file, format_args!("PUSH R{}", register));
+    write_line(file, format_args!("ADD SP, 4"));
+    write_line(file, format_args!("CALL 0"));
+    write_line(file, format_args!("POP R{}", register));
+    write_line(file, format_args!("SUB SP,4"));
+    __restore_registers(file, register);
+    register
+}
+/*
+ * Meta function to generate xsm code for Exit Syscall
  */
 fn __xsm_exit_syscall(file: &File) {
     let register = get_reg();

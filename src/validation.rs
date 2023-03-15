@@ -1,7 +1,6 @@
 use crate::codegen::*;
 use crate::parserlib::*;
 use std::collections::LinkedList;
-use std::fmt::Pointer;
 
 pub fn getvartype(name: &String) -> Option<ASTExprType> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -32,20 +31,56 @@ pub fn getvartype(name: &String) -> Option<ASTExprType> {
     }
     None
 }
+#[allow(dead_code)]
+fn validate_field_array_access(
+    array_name: &String,
+    parent_type: &ASTExprType,
+    array_access: &mut Vec<Box<ASTNode>>,
+) -> Result<(), String> {
+    let actual_array_type = parent_type.get_field_type(array_name)?;
+    for ei in 0..array_access.len() {
+        array_access[ei].validate()?;
+        if let Some(ei_type) = array_access[ei].getexprtype() {
+            match ei_type {
+                ASTExprType::Primitive(PrimitiveType::Int) => {
+                    continue;
+                }
+                _ => {
+                    return Err("Invalid type used to index variable [".to_owned()
+                        + array_name.as_str()
+                        + "] at "
+                        + "[]".repeat(ei).as_str());
+                }
+            }
+        } else {
+            return Err("Invalid type used to index variable [".to_owned()
+                + array_name.as_str()
+                + "] at "
+                + "[]".repeat(ei).as_str());
+        }
+    }
+    Ok(())
+}
 impl ASTNode {
     pub fn validate(&mut self) -> Result<(), String> {
-        //while
         match self {
-            ASTNode::VAR { name, indices } => {
+            ASTNode::VAR {
+                name,
+                array_access,
+                dot_field_access,
+                arrow_field_access,
+            } => {
                 varinscope(&name)?;
                 let dind = getvarindices(&name).unwrap();
-                if indices.len() > dind.len() {
+                if array_access.len() > dind.len() {
                     return Err("Index dimension error for variable [".to_owned()
                         + name.as_str()
                         + "]");
                 }
-                for ei in 0..indices.len() {
-                    if let Some(ei_type) = indices[ei].getexprtype() {
+                //validate array access
+                for ei in 0..array_access.len() {
+                    array_access[ei].validate()?;
+                    if let Some(ei_type) = array_access[ei].getexprtype() {
                         match ei_type {
                             ASTExprType::Primitive(PrimitiveType::Int) => {
                                 continue;
@@ -62,6 +97,84 @@ impl ASTNode {
                             + name.as_str()
                             + "] at "
                             + "[]".repeat(ei).as_str());
+                    }
+                }
+
+                let mut currtype: ASTExprType = getvartype(name).unwrap();
+
+                for _ in 0..array_access.len() {
+                    currtype = currtype.derefr().unwrap();
+                }
+                // check if dot field type is
+                let mut dotptr = &mut **dot_field_access;
+                let mut arrowptr = &mut **arrow_field_access;
+                loop {
+                    if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
+                        break;
+                    }
+                    if dotptr != &ASTNode::Void {
+                        if let ASTNode::VAR {
+                            name: nname,
+                            array_access,
+                            dot_field_access,
+                            arrow_field_access,
+                        } = dotptr
+                        {
+                            if array_access.len() > 0 {
+                                return Err(
+                                    "Arrays inside struct is not implemented yet!".to_owned()
+                                );
+                            }
+                            currtype.get_field_id(&nname)?;
+                            //validate_field_array_access(nname, &currtype, array_access)?;
+
+                            currtype = currtype.get_field_type(nname)?;
+                            for _ in 0..array_access.len() {
+                                currtype = currtype.derefr().unwrap();
+                            }
+                            //get next field type
+                            dotptr = &mut **dot_field_access;
+                            arrowptr = &mut **arrow_field_access;
+                            continue;
+                        } else {
+                            return Err("Dot operator can only be used to access [struct_t] types"
+                                .to_owned());
+                        }
+                    }
+                    // check if dot field type is
+                    if arrowptr != &ASTNode::Void {
+                        if let ASTNode::VAR {
+                            name: nname,
+                            array_access,
+                            dot_field_access,
+                            arrow_field_access,
+                        } = arrowptr
+                        {
+                            if array_access.len() > 0 {
+                                return Err(
+                                    "Arrays inside struct is not implemented yet!".to_owned()
+                                );
+                            }
+                            if let ASTExprType::Pointer(etype) = &currtype {
+                                etype.get_field_id(&nname)?;
+                                currtype = etype.get_field_type(nname)?;
+                                for _ in 0..array_access.len() {
+                                    currtype = currtype.derefr().unwrap();
+                                }
+                                dotptr = &mut **dot_field_access;
+                                arrowptr = &mut **arrow_field_access;
+                                continue;
+                            } else {
+                                return Err("Dot operator expects a variable name".to_owned());
+                            }
+                            //TODO validate array access
+                            //validate_field_array_access(nname, &currtype, array_access)?;
+                        } else {
+                            return Err(
+                                "Arrow operator can only be used to access [struct_t*] types"
+                                    .to_owned(),
+                            );
+                        }
                     }
                 }
                 Ok(())
@@ -119,9 +232,36 @@ impl ASTNode {
                 ptr,
                 depth,
             } => match op {
+                ASTNodeType::Free => {
+                    if let Some(ASTExprType::Pointer(p)) = ptr.getexprtype() {
+                        Ok(())
+                    } else {
+                        Err("Free expects a pointer type.".to_owned())
+                    }
+                }
+                ASTNodeType::Initialize => {
+                    if *INITFLAG.lock().unwrap() {
+                        return Err("Initialize should only be called once".to_owned());
+                    }
+                    *INITFLAG.lock().unwrap() = true;
+                    Ok(())
+                }
+                ASTNodeType::Alloc => match &**ptr {
+                    ASTNode::VAR {
+                        name,
+                        array_access,
+                        dot_field_access,
+                        arrow_field_access,
+                    } => {
+                        if let Some(ASTExprType::Pointer(p)) = ptr.getexprtype() {
+                            Ok(())
+                        } else {
+                            Err("Alloc can only be used on pointer types.".to_owned())
+                        }
+                    }
+                    _ => Err("Alloc expects a declared variable.".to_owned()),
+                },
                 ASTNodeType::Deref => {
-                    ptr.validate()?;
-
                     if let Some(ptrtype) = ptr.getexprtype() {
                         if ptrtype.depth() < depth.unwrap() {
                             return Err("Dereferencing non pointer type.".to_owned());
@@ -130,25 +270,29 @@ impl ASTNode {
                     self.getexprtype();
                     Ok(())
                 }
-                ASTNodeType::Ref => {
-                    ptr.validate()?;
-                    match &**ptr {
-                        ASTNode::VAR { name, indices } => {
-                            let varindices = getvarindices(name).unwrap();
-                            if indices.len() != varindices.len() {
-                                return Err("Reference operator can only reference to the basetype of an array.".to_owned());
-                            }
-                            Ok(())
+                ASTNodeType::Ref => match &**ptr {
+                    ASTNode::VAR {
+                        name,
+                        array_access,
+                        dot_field_access,
+                        arrow_field_access,
+                    } => {
+                        let varindices = getvarindices(name).unwrap();
+                        if array_access.len() != varindices.len() {
+                            return Err("Reference operator can only reference to the basetype of an array.".to_owned());
                         }
-                        _ => Err("Reference operator expects a declared variable.".to_owned()),
+                        Ok(())
                     }
-                }
+                    _ => Err("Reference operator expects a declared variable.".to_owned()),
+                },
                 ASTNodeType::Write => {
                     ptr.validate()?;
                     match &**ptr {
                         ASTNode::VAR {
                             name: _,
-                            indices: _,
+                            array_access: _,
+                            dot_field_access: _,
+                            arrow_field_access: _,
                         } => Ok(()),
                         ASTNode::INT(_) => Ok(()),
                         ASTNode::STR(_) => Ok(()),
@@ -191,7 +335,13 @@ impl ASTNode {
                     if lhs_t == rhs_t {
                         Ok(())
                     } else {
-                        Err("Assignment of invalid type.".to_owned())
+                        match (lhs_t, rhs_t) {
+                            (
+                                Some(ASTExprType::Pointer(..)),
+                                Some(ASTExprType::Primitive(PrimitiveType::Null)),
+                            ) => Ok(()),
+                            _ => Err("Assignment of invalid type.".to_owned()),
+                        }
                     }
                 }
                 ASTNodeType::Gt
@@ -212,7 +362,7 @@ impl ASTNode {
                 | ASTNodeType::Slash
                 | ASTNodeType::Mod => {
                     let expr = self.getexprtype();
-                    if expr != None && expr != Some(ASTExprType::Primitive(PrimitiveType::Null)) {
+                    if expr != None && expr != Some(ASTExprType::Primitive(PrimitiveType::Void)) {
                         Ok(())
                     } else {
                         Err("Operator +-/*% got invalid types.".to_owned())
@@ -241,7 +391,8 @@ impl ASTNode {
                 } else {
                     return Ok(());
                 }
-                compare_arglist_paramlist(arglist, &mut p)
+                std::mem::drop(gst);
+                compare_arglist_paramlist(fname, arglist, &mut p)
             }
             ASTNode::FuncDefNode {
                 fname,
@@ -289,15 +440,76 @@ impl ASTNode {
             ASTNode::ErrorNode { err } => match err {
                 ASTError::TypeError(s) => {
                     exit_on_err(s.to_owned());
-                    Some(ASTExprType::Primitive(PrimitiveType::Null))
+                    Some(ASTExprType::Primitive(PrimitiveType::Void))
                 }
             },
+            ASTNode::Null => Some(ASTExprType::Primitive(PrimitiveType::Null)),
             ASTNode::STR(_) => Some(ASTExprType::Primitive(PrimitiveType::String)),
             ASTNode::INT(_) => Some(ASTExprType::Primitive(PrimitiveType::Int)),
-            ASTNode::VAR { name, indices } => {
+            ASTNode::VAR {
+                name,
+                array_access,
+                dot_field_access,
+                arrow_field_access,
+            } => {
                 if let Some(mut vtype) = getvartype(&name) {
-                    for _ in 0..indices.len() {
+                    for _ in 0..array_access.len() {
                         vtype = vtype.derefr().unwrap();
+                    }
+                    let mut dotptr = &**dot_field_access;
+                    let mut arrowptr = &**arrow_field_access;
+                    loop {
+                        if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
+                            break;
+                        }
+                        if dotptr != &ASTNode::Void {
+                            if let ASTNode::VAR {
+                                name: nname,
+                                array_access: _,
+                                dot_field_access,
+                                arrow_field_access,
+                            } = dotptr
+                            {
+                                if array_access.len() > 0 {
+                                    exit_on_err(
+                                        "Arrays inside structs are not implemented yet.".to_owned(),
+                                    );
+                                }
+                                if let Err(e) = vtype.get_field_id(nname) {
+                                    exit_on_err(e.to_owned());
+                                }
+                                vtype = vtype.get_field_type(nname).unwrap();
+                                dotptr = &**dot_field_access;
+                                arrowptr = &**arrow_field_access;
+                            }
+                        }
+                        if arrowptr != &ASTNode::Void {
+                            if let ASTNode::VAR {
+                                name: nname,
+                                array_access,
+                                dot_field_access,
+                                arrow_field_access,
+                            } = arrowptr
+                            {
+                                if array_access.len() > 0 {
+                                    exit_on_err(
+                                        "Arrays inside structs are not implemented yet.".to_owned(),
+                                    );
+                                }
+                                if let ASTExprType::Pointer(etype) = &vtype {
+                                    if let Err(e) = etype.get_field_id(&nname) {
+                                        exit_on_err(e.to_owned());
+                                    }
+                                    vtype = etype.get_field_type(nname).unwrap();
+                                    dotptr = &**dot_field_access;
+                                    arrowptr = &**arrow_field_access;
+                                } else {
+                                    exit_on_err(
+                                        "Arrow operator expects a variable of struct_t*".to_owned(),
+                                    );
+                                }
+                            }
+                        }
                     }
                     return Some(vtype);
                 } else {
@@ -334,7 +546,7 @@ impl ASTNode {
                         exprtype.clone()
                     }
                 }
-                _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
+                _ => Some(ASTExprType::Primitive(PrimitiveType::Void)),
             },
             ASTNode::BinaryNode {
                 op,
@@ -365,8 +577,20 @@ impl ASTNode {
 
                         *exprtype = match (lhs_t, rhs_t) {
                             (
+                                ASTExprType::Primitive(PrimitiveType::Null),
+                                ASTExprType::Pointer(..),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (
+                                ASTExprType::Pointer(..),
+                                ASTExprType::Primitive(PrimitiveType::Null),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (
                                 ASTExprType::Primitive(PrimitiveType::Int),
                                 ASTExprType::Primitive(PrimitiveType::Int),
+                            ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
+                            (
+                                ASTExprType::Primitive(PrimitiveType::String),
+                                ASTExprType::Primitive(PrimitiveType::String),
                             ) => Some(ASTExprType::Primitive(PrimitiveType::Bool)),
                             (ASTExprType::Pointer(ptr1), ASTExprType::Pointer(ptr2)) => {
                                 if ptr1.depth() == ptr2.depth()
@@ -426,7 +650,7 @@ impl ASTNode {
                         exprtype.clone()
                     }
                 }
-                _ => Some(ASTExprType::Primitive(PrimitiveType::Null)),
+                _ => Some(ASTExprType::Primitive(PrimitiveType::Void)),
             },
             ASTNode::FuncCallNode { fname, arglist: _ } => {
                 let gst = GLOBALSYMBOLTABLE.lock().unwrap();
@@ -517,6 +741,7 @@ pub fn varinscope(name: &String) -> Result<(), String> {
  * Function to validate the pamalist in declaration to definition
  */
 fn compare_arglist_paramlist(
+    fname: &mut String,
     arglist: &mut LinkedList<ASTNode>,
     paramlist: &mut LinkedList<VarNode>,
 ) -> Result<(), String> {
@@ -531,12 +756,11 @@ fn compare_arglist_paramlist(
     let mut ctr = 1;
     while let (Some(arg), Some(param)) = (aiter.next(), piter.next()) {
         if arg.getexprtype().unwrap() != param.vartype {
-            return Err(
-                "Function call arguments and declaration arguments dont match in type at ["
-                    .to_owned()
-                    + ctr.to_string().as_str()
-                    + "] position.",
-            );
+            return Err("Function [".to_owned()
+                + fname.as_str()
+                + "] call arguments and declaration arguments dont match in type at ["
+                + ctr.to_string().as_str()
+                + "] position.");
         }
         ctr = ctr + 1;
     }
