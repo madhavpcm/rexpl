@@ -678,7 +678,7 @@ pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
 pub fn __lst_install_params(paramlist: &mut LinkedList<VarNode>) -> Result<(), String> {
     //Check if this variable is in Global Symbol Table
     let mut localid = -3;
-    for param in paramlist.iter_mut() {
+    for param in paramlist.iter_mut().rev() {
         param.validate_locality();
         let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
         let mut siz = param.vartype.size()?;

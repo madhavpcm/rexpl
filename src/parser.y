@@ -82,16 +82,18 @@ FType-> Result<ASTExprType,String>:
 		let mut rt = RET_TYPE.lock().unwrap();
 		//TODO verify
 		*rt = t.clone();
+		std::mem::drop(rt);
 		Ok(t)
 	}
 	| Type PtrPtr
 	{
 		let mut ptr = $2?;
 		let t = $1?;
+		ptr.set_base_type(t.get_base_type());
 		let mut rt = RET_TYPE.lock().unwrap();
 		//TODO verify
-		ptr.set_base_type(t.get_base_type());
 		*rt = ptr.clone();
+		std::mem::drop(rt);
 		Ok(ptr)
 	}
     ;
@@ -321,11 +323,16 @@ FBlock -> Result<ASTNode,String>:
 FDefBlock -> Result<ASTNode,String>:
 	FDefBlock FDef 
 	{
+		let f1 = $1?;
+		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+		*lst = HashMap::default();
+		std::mem::drop(lst);
+		let f2 = $2?;
 		Ok(ASTNode::BinaryNode{
 			op: ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
-			lhs: Box::new($1?),
-			rhs: Box::new($2?),
+			lhs: Box::new(f1),
+			rhs: Box::new(f2),
 		})
 	}
 	| FDef
@@ -339,12 +346,11 @@ FDef ->Result<ASTNode,String>:
 		let v = $2.map_err(|_| "VAR Err".to_string())?; 
 		$7?;
 		let funcname = parse_string($lexer.span_str(v.span())).unwrap();
-		let paramlist_ = $4?;
 		let mut node = ASTNode::FuncDefNode{
 			fname: funcname.clone(),
 			ret_type: $1?,
 			body: Box::new($8?),
-			paramlist: paramlist_.clone()
+			paramlist: $4?, 
 		};
 		node.validate()?;
 
@@ -357,7 +363,7 @@ FDef ->Result<ASTNode,String>:
 			lst.clone()
 		);
 		//reset data structures
-		(*lst).clear();
+		*lst = HashMap::default();
 		*lv = 1;
 		std::mem::drop(lv);
 		std::mem::drop(lst);
@@ -377,6 +383,7 @@ LDeclBlock -> Result<(),String>:
 	}
 	|
 	{
+		//log::info!("Empty LdeclBlock");
 		Ok(())
 	}
 	;
@@ -385,16 +392,26 @@ ParamListBlock -> Result<LinkedList<VarNode>,String>:
 	ParamList 
 	{
 		let mut node = $1?;
-		__lst_install_params(&mut node);
+		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+		*lst = HashMap::default();
+		std::mem::drop(lst);
+		__lst_install_params(&mut node)?;
 		Ok(node)
+	}
+	|
+	{
+		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
+		*lst = HashMap::default();
+		std::mem::drop(lst);
+		Ok(LinkedList::new())
 	}
 	;
 
 ParamList -> Result<LinkedList<VarNode>,String>:
 	ParamList ',' Param
 	{
-        let mut paramlist = $3?;
-		paramlist.append(&mut $1?);
+        let mut paramlist = $1?;
+		paramlist.append(&mut $3?);
 		Ok(paramlist)
 	}
 	| Param
@@ -1061,4 +1078,4 @@ FieldPtr-> Result<FieldType,String>:
 // Any functions here are in scope for all the grammar actions above.
 use crate::parserlib::{*};
 use crate::codegen::exit_on_err;
-use std::collections::LinkedList;
+use std::collections::{LinkedList,HashMap};

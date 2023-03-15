@@ -391,7 +391,8 @@ impl ASTNode {
                 } else {
                     return Ok(());
                 }
-                compare_arglist_paramlist(arglist, &mut p)
+                std::mem::drop(gst);
+                compare_arglist_paramlist(fname, arglist, &mut p)
             }
             ASTNode::FuncDefNode {
                 fname,
@@ -740,6 +741,7 @@ pub fn varinscope(name: &String) -> Result<(), String> {
  * Function to validate the pamalist in declaration to definition
  */
 fn compare_arglist_paramlist(
+    fname: &mut String,
     arglist: &mut LinkedList<ASTNode>,
     paramlist: &mut LinkedList<VarNode>,
 ) -> Result<(), String> {
@@ -754,12 +756,11 @@ fn compare_arglist_paramlist(
     let mut ctr = 1;
     while let (Some(arg), Some(param)) = (aiter.next(), piter.next()) {
         if arg.getexprtype().unwrap() != param.vartype {
-            return Err(
-                "Function call arguments and declaration arguments dont match in type at ["
-                    .to_owned()
-                    + ctr.to_string().as_str()
-                    + "] position.",
-            );
+            return Err("Function [".to_owned()
+                + fname.as_str()
+                + "] call arguments and declaration arguments dont match in type at ["
+                + ctr.to_string().as_str()
+                + "] position.");
         }
         ctr = ctr + 1;
     }
