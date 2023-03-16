@@ -79,6 +79,14 @@ impl Default for GlobalSymbolTable {
             },
         );
         table.insert(
+            "syscall".to_owned(),
+            GSymbol::Func {
+                ret_type: ASTExprType::Primitive(PrimitiveType::Int),
+                paramlist: (LinkedList::default()),
+                flabel: (0),
+            },
+        );
+        table.insert(
             "alloc".to_owned(),
             GSymbol::Func {
                 ret_type: ASTExprType::Pointer(Box::new(ASTExprType::Primitive(
@@ -113,7 +121,7 @@ impl TypeTable {
     }
     pub fn tt_exists(&self, tname: &String) -> bool {
         let table = &self.table;
-        if let Some(entry) = table.get(tname) {
+        if let Some(_) = table.get(tname) {
             true
         } else {
             false
@@ -231,6 +239,15 @@ pub enum ASTNodeType {
     Ee,
     Ne,
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum STDLibFunction {
+    Heapset,
+    Alloc,
+    Free,
+    Read,
+    Write,
+    Syscall,
+}
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum PrimitiveType {
     Int,
@@ -282,7 +299,9 @@ impl ASTExprType {
             ASTExprType::Primitive(_) => Ok(1),
             ASTExprType::Pointer(_) => Ok(1),
             ASTExprType::Struct(s) => Ok(s.size),
-            ASTExprType::Error => Err("This shouldn't happen.".to_owned()),
+            ASTExprType::Error => {
+                unreachable!()
+            }
         }
     }
     pub fn get_field_type(&self, fname: &String) -> Result<ASTExprType, String> {
@@ -586,6 +605,10 @@ pub enum ASTNode {
     },
     FuncCallNode {
         fname: String,
+        arglist: Box<LinkedList<ASTNode>>,
+    },
+    StdFuncCallNode {
+        func: STDLibFunction,
         arglist: Box<LinkedList<ASTNode>>,
     },
     ErrorNode {

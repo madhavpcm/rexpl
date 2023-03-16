@@ -37,7 +37,7 @@ fn validate_field_array_access(
     parent_type: &ASTExprType,
     array_access: &mut Vec<Box<ASTNode>>,
 ) -> Result<(), String> {
-    let actual_array_type = parent_type.get_field_type(array_name)?;
+    let _actual_array_type = parent_type.get_field_type(array_name)?;
     for ei in 0..array_access.len() {
         array_access[ei].validate()?;
         if let Some(ei_type) = array_access[ei].getexprtype() {
@@ -64,6 +64,33 @@ fn validate_field_array_access(
 impl ASTNode {
     pub fn validate(&mut self) -> Result<(), String> {
         match self {
+            ASTNode::StdFuncCallNode { func, arglist } => match func {
+                STDLibFunction::Syscall => {
+                    //check if first value is an integer
+                    if arglist.len().clone() != 5 {
+                        return Err("[Syscall] system call expects 5 arguments.".to_owned());
+                    }
+                    let mut iter = arglist.iter_mut();
+                    if let Some(i) = iter.next() {
+                        if i.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Int)) {
+                            return Err(
+                                "[Syscall] system call number must be an int type.".to_owned()
+                            );
+                        }
+                    }
+                    if let Some(i) = iter.next() {
+                        if let ASTNode::INT(_) = i {
+                        } else {
+                            return Err(
+                                "[Syscall] interrupt routine number must be an integer.".to_owned()
+                            );
+                        }
+                    }
+                    Ok(())
+                    //check if sec
+                }
+                _ => Err("Std function Unimplemented!".to_owned()),
+            },
             ASTNode::VAR {
                 name,
                 array_access,
@@ -99,9 +126,7 @@ impl ASTNode {
                             + "[]".repeat(ei).as_str());
                     }
                 }
-
                 let mut currtype: ASTExprType = getvartype(name).unwrap();
-
                 for _ in 0..array_access.len() {
                     currtype = currtype.derefr().unwrap();
                 }
@@ -233,7 +258,7 @@ impl ASTNode {
                 depth,
             } => match op {
                 ASTNodeType::Free => {
-                    if let Some(ASTExprType::Pointer(p)) = ptr.getexprtype() {
+                    if let Some(ASTExprType::Pointer(_)) = ptr.getexprtype() {
                         Ok(())
                     } else {
                         Err("Free expects a pointer type.".to_owned())
@@ -248,12 +273,12 @@ impl ASTNode {
                 }
                 ASTNodeType::Alloc => match &**ptr {
                     ASTNode::VAR {
-                        name,
-                        array_access,
-                        dot_field_access,
-                        arrow_field_access,
+                        name: _,
+                        array_access: _,
+                        dot_field_access: _,
+                        arrow_field_access: _,
                     } => {
-                        if let Some(ASTExprType::Pointer(p)) = ptr.getexprtype() {
+                        if let Some(ASTExprType::Pointer(_)) = ptr.getexprtype() {
                             Ok(())
                         } else {
                             Err("Alloc can only be used on pointer types.".to_owned())
@@ -274,8 +299,8 @@ impl ASTNode {
                     ASTNode::VAR {
                         name,
                         array_access,
-                        dot_field_access,
-                        arrow_field_access,
+                        dot_field_access: _,
+                        arrow_field_access: _,
                     } => {
                         let varindices = getvarindices(name).unwrap();
                         if array_access.len() != varindices.len() {

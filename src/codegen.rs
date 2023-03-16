@@ -95,6 +95,7 @@ fn __push_args(file: &File, arglist: &LinkedList<ASTNode>, refr: bool) {
     for arg in arglist {
         let argreg = __code_gen(&arg, file, refr);
         write_line(file, format_args!("PUSH R{}", argreg));
+        free_reg(argreg);
     }
 }
 //function to backup live registers
@@ -544,7 +545,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                                 __copy_struct(file, name, left_register, right_register);
                             }
                         }
-                        _ => exit_on_err("This shouldnt happen.".to_owned()),
+                        _ => {}
                     }
                     write_line(
                         file,
@@ -577,8 +578,9 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             depth,
         } => match op {
             ASTNodeType::Alloc => {
-                let mut unopt = (&**ptr).clone();
-                let mptr = __xsm_alloc_syscall(file, unopt.getexprtype().unwrap().size().unwrap());
+                //let mut unopt = (&**ptr).clone();
+                let mptr =
+                    __xsm_alloc_syscall(file /*unopt.getexprtype().unwrap().size().unwrap()*/);
                 let p = __code_gen(&**ptr, file, true);
                 write_line(file, format_args!("MOV [R{}], R{}", p, mptr));
                 free_reg(mptr);
@@ -665,6 +667,35 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 }
             },
             _ => 0,
+        },
+        ASTNode::StdFuncCallNode { func, arglist } => match func {
+            STDLibFunction::Syscall => {
+                __backup_registers(file);
+                let mut c = 0;
+                let mut interruptval = 0;
+                for i in arglist.iter() {
+                    if c != 1 {
+                        let reg = __code_gen(i, file, false);
+                        write_line(file, format_args!("PUSH R{}", reg));
+                        free_reg(reg);
+                    } else {
+                        if let ASTNode::INT(p) = i {
+                            interruptval = *p;
+                        } else {
+                            unreachable!()
+                        }
+                    }
+                    c = c + 1;
+                }
+                let reg = __get_safe_register();
+                write_line(file, format_args!("ADD SP, 1"));
+                write_line(file, format_args!("INT {}", interruptval));
+                write_line(file, format_args!("POP R{}", reg));
+                write_line(file, format_args!("SUB SP, 4"));
+                __restore_registers(file, reg);
+                reg
+            }
+            _ => 500,
         },
         ASTNode::FuncCallNode { fname, arglist } => {
             //Save Live registers except ret_reg
@@ -962,7 +993,7 @@ fn __header_gen(mut file: &File) {
 /*
  * Meta function to generate xsm code for Alloc Syscall
  */
-fn __xsm_alloc_syscall(file: &File, size: usize) -> usize {
+fn __xsm_alloc_syscall(file: &File) -> usize {
     __backup_registers(file);
     let register = __get_safe_register();
     write_line(file, format_args!("MOV R{}, \"Alloc\"", register));
@@ -979,7 +1010,7 @@ fn __xsm_alloc_syscall(file: &File, size: usize) -> usize {
 /*
  * Meta function to generate xsm code for Free Syscall
  */
-fn __xsm_free_syscall(file: &File, varreg: usize) -> usize {
+fn __xsm_free_syscall(file: &File, _varreg: usize) -> usize {
     __backup_registers(file);
     let register = __get_safe_register();
     write_line(file, format_args!("MOV R{}, \"Free\"", register));

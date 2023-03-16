@@ -28,6 +28,7 @@ alloc "ALLOC"
 free "FREE"
 null|NULL 'NULL'
 initialize "INIT"
+syscall "SYSCALL"
 
 [.] "DOT"
 -> "ARROW"

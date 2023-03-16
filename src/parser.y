@@ -9,6 +9,7 @@
 %token "BEGIN"
 %token "END"
 %token "READ"
+%token "SYSCALL"
 %token "WRITE"
 %token "IF"
 %token "THEN"
@@ -550,6 +551,13 @@ Stmt -> Result<ASTNode,String>:
 		};
 		node.validate()?;
 		Ok(node)
+	}
+	| 'SYSCALL' '(' ArgList ')' ';'
+	{
+		Ok(ASTNode::StdFuncCallNode{
+			func: STDLibFunction::Syscall,
+			arglist: Box::new($3?),
+		})
 	}
 	;
 WhileStmt -> Result<ASTNode,String>:
