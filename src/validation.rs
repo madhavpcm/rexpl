@@ -273,8 +273,12 @@ impl ASTNode {
             }
             ASTNode::ReturnNode { expr } => {
                 let ct = RET_TYPE.lock().unwrap().clone();
-                expr.validate()?;
                 let b = expr.getexprtype();
+                if b == Some(ASTExprType::Primitive(PrimitiveType::Null)) {
+                    if let ASTExprType::Pointer(_) = ct {
+                        return Ok(());
+                    }
+                }
                 if b != Some(ct) {
                     return Err("Invalid return type.".to_owned());
                 }

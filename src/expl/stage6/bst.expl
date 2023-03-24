@@ -9,6 +9,7 @@ endtype
 decl
   int in,opt;
   bst* insert(bst* h, int key);
+  bst* search(bst* tree, int val);
   int inOrder(bst* h);
   int preOrder(bst* h);
   int postOrder(bst* h);
@@ -32,6 +33,24 @@ bst* insert(bst* h, int key)
 
     return h;
   end
+}
+
+bst* search(bst* tree, int val)
+{
+	begin
+		if(tree == null) then
+			return null;
+		endif;
+		if(tree->a == val) then
+			return tree;
+		else
+			if(tree->a > val) then
+				return search(tree->left, val);
+			else
+				return search(tree->right, val);
+			endif;
+		endif;
+	end
 }
 
 int inOrder(bst* h){
@@ -82,6 +101,7 @@ int main()
   decl
   int val,flag;
   bst* Root;
+  bst* node;
   enddecl
 
   begin
@@ -98,6 +118,9 @@ int main()
     in = inOrder(Root);
     in = preOrder(Root);
     in = postOrder(Root);
+	node = search(Root,50);
+	write(node->a);
+
 
   return 9;
   end
