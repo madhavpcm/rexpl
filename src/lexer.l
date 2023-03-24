@@ -1,6 +1,6 @@
 %%
 /\*[^*]*\*+(?:[^/*][^*]*\*+)*/ "MULTI_COMMENT"
-//[^\n]* "SINGLE_COMMENT"
+[\t ]*//[^\n]* "SINGLE_COMMENT"
 
 endwhile "ENDWHILE"
 while "WHILE"
@@ -29,6 +29,8 @@ free "FREE"
 null|NULL 'NULL'
 initialize "INIT"
 syscall "SYSCALL"
+setaddr 'SETADDR'
+getaddr 'GETADDR'
 
 [.] "DOT"
 -> "ARROW"

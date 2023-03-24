@@ -247,6 +247,8 @@ pub enum STDLibFunction {
     Read,
     Write,
     Syscall,
+    Setaddr,
+    Getaddr,
 }
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum PrimitiveType {

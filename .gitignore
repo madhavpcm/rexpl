@@ -3,3 +3,4 @@
 *.o
 *.xsm
 input.expl
+xsm_expl/

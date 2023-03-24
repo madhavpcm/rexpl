@@ -14,6 +14,7 @@ use std::sync::Mutex;
 //TODO Assignment statement can be optimized
 //recursive call
 const MAX_REGISTERS: usize = 21;
+const CONN_RETURN: usize = 25;
 pub const XSM_STACK_OFFSET: i64 = 4096;
 pub const LABEL_NOT_FOUND: usize = 10000;
 
@@ -87,6 +88,9 @@ pub fn free_reg(register: usize) -> u64 {
         return MAX_REGISTERS.try_into().unwrap();
     }
     let mut registers = REGISTERS.lock().unwrap();
+    if registers[register].0 == false {
+        log::warn!("Reg{} double free warning", register);
+    }
     registers[register].0 = false;
     return MAX_REGISTERS.try_into().unwrap();
 }
@@ -106,7 +110,6 @@ fn __backup_registers(file: &File) {
 
     for i in 0..MAX_REGISTERS {
         if registers[i].0 == true {
-            log::info!("R{} is being saved", i);
             write_line(file, format_args!("PUSH R{}", i));
         }
         registers[i].0 = false;
@@ -204,11 +207,11 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ASTError::TypeError(s) => s.to_owned(),
             };
             exit_on_err(err);
-            25
+            unreachable!()
         }
         ASTNode::BreakpointNode => {
             write_line(file, format_args!("BRKP"));
-            25
+            CONN_RETURN
         }
         ASTNode::STR(s) => {
             let register = get_reg();
@@ -553,14 +556,12 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     );
                     free_reg(left_register);
                     free_reg(right_register);
-                    25
+                    CONN_RETURN
                 }
                 ASTNodeType::Connector => {
-                    let res = __code_gen(lhs, file, false);
-                    free_reg(res);
-                    let res = __code_gen(rhs, file, false);
-                    free_reg(res);
-                    25
+                    free_reg(__code_gen(lhs, file, false));
+                    free_reg(__code_gen(rhs, file, false));
+                    CONN_RETURN
                 }
                 _ => 0,
             };
@@ -585,15 +586,15 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 write_line(file, format_args!("MOV [R{}], R{}", p, mptr));
                 free_reg(mptr);
                 free_reg(p);
-                0
+                CONN_RETURN
             }
             ASTNodeType::Free => {
                 free_reg(__xsm_free_syscall(file, __code_gen(&**ptr, file, refr)));
-                0
+                CONN_RETURN
             }
             ASTNodeType::Initialize => {
                 free_reg(__xsm_heapset_syscall(file));
-                0
+                CONN_RETURN
             }
             ASTNodeType::Read => {
                 __backup_registers(file);
@@ -631,23 +632,20 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 __restore_registers(file, ret_reg);
                 ret_reg
             }
-            ASTNodeType::Ref => {
-                match &**ptr {
-                    ASTNode::VAR {
-                        name: _,
-                        array_access: _,
-                        dot_field_access: _,
-                        arrow_field_access: _,
-                    } => {
-                        let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
-                        return regaddr;
-                    }
-                    _ => {
-                        exit_on_err("Reference to a non variable is not allowed".to_string());
-                    }
+            ASTNodeType::Ref => match &**ptr {
+                ASTNode::VAR {
+                    name: _,
+                    array_access: _,
+                    dot_field_access: _,
+                    arrow_field_access: _,
+                } => {
+                    let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
+                    return regaddr;
                 }
-                0
-            }
+                _ => {
+                    unreachable!();
+                }
+            },
             ASTNodeType::Deref => match &**ptr {
                 ASTNode::VAR {
                     name: _,
@@ -662,11 +660,12 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     return regaddr;
                 }
                 _ => {
-                    exit_on_err("Cannot dereference a variable".to_string());
-                    0
+                    unreachable!();
                 }
             },
-            _ => 0,
+            _ => {
+                unreachable!();
+            }
         },
         ASTNode::StdFuncCallNode { func, arglist } => match func {
             STDLibFunction::Syscall => {
@@ -695,7 +694,29 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 __restore_registers(file, reg);
                 reg
             }
-            _ => 500,
+            STDLibFunction::Getaddr => {
+                let reg = __code_gen((&**arglist).front().unwrap(), file, false);
+                write_line(file, format_args!("MOV R{}, [R{}]", reg, reg));
+                reg
+            }
+            STDLibFunction::Setaddr => {
+                let mut c = 0;
+                let mut reg1 = 5;
+                let mut reg2 = 5;
+                for i in &**arglist {
+                    if c == 0 {
+                        reg1 = __code_gen(i, file, false);
+                    } else {
+                        reg2 = __code_gen(i, file, false);
+                    }
+                    c = c + 1;
+                }
+                write_line(file, format_args!("MOV [R{}], R{}", reg1, reg2));
+                free_reg(reg1);
+                free_reg(reg2);
+                CONN_RETURN
+            }
+            _ => unreachable!(),
         },
         ASTNode::FuncCallNode { fname, arglist } => {
             //Save Live registers except ret_reg
@@ -743,7 +764,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let mut registers = REGISTERS.lock().unwrap();
             *registers = vec![(false, 0); MAX_REGISTERS];
             std::mem::drop(registers);
-            25
+            CONN_RETURN
         }
         ASTNode::MainNode { body } => {
             //this node is traverse after all function def nodes,
@@ -778,12 +799,10 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 let mut registers = REGISTERS.lock().unwrap();
                 *registers = vec![(false, 0); MAX_REGISTERS];
                 std::mem::drop(registers);
-
-                __xsm_exit_syscall(file);
             } else {
-                exit_on_err("main not defined".to_string())
+                unreachable!();
             }
-            25
+            CONN_RETURN
         }
         /*
          * L{funclabel}:
@@ -817,7 +836,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
 
                 __code_gen(&**body, file, false);
             }
-            25
+            CONN_RETURN
         }
         /*
          * <expr>
@@ -852,7 +871,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             write_line(file, format_args!("L{}:", l1));
             __code_gen(xelse, file, false);
             write_line(file, format_args!("L{}:", l2));
-            25
+            CONN_RETURN
         }
         /* While Node
          * L1:
@@ -897,7 +916,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             //add label count for exit case
             write_line(file, format_args!("L{}:", l2));
             //increment label_count
-            25
+            CONN_RETURN
         }
         /* If Node
          * <expr>
@@ -922,7 +941,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             //result is 0 as xif is a stmtlist
             write_line(file, format_args!("L{}:", l1));
             //increment label_count
-            25
+            CONN_RETURN
         }
         /*
          * L1:
@@ -936,15 +955,15 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let while_tracker = WHILE_TRACKER.lock().unwrap();
             writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 1])
                 .expect("[code_gen] Write error");
-            25
+            CONN_RETURN
         }
         ASTNode::ContinueNode => {
             let while_tracker = WHILE_TRACKER.lock().unwrap();
             writeln!(file, "JMP L{}", while_tracker[while_tracker.len() - 2])
                 .expect("[code_gen] Write error");
-            25
+            CONN_RETURN
         }
-        ASTNode::Void => 25,
+        ASTNode::Void => CONN_RETURN,
     }
 }
 
@@ -1064,11 +1083,12 @@ pub fn code_gen(root: &ASTNode, filename: String) -> usize {
             file.set_len(0)
                 .expect("[code_gen] Error truncating existing file");
             __header_gen(&file);
-            let result: usize = __code_gen(root, &file, false);
-            write_line(&file, format_args!("PUSH R{}", result));
+            if __code_gen(root, &file, false) != CONN_RETURN {
+                log::error!("[code_gen] Invalid register returned.");
+            }
             __xsm_exit_syscall(&file);
             log::trace!("Generated Object file: {}", filename.as_str());
-            result
+            0
         }
         Err(e) => {
             exit_on_err(e.to_string());

@@ -67,8 +67,9 @@ impl ASTNode {
             ASTNode::StdFuncCallNode { func, arglist } => match func {
                 STDLibFunction::Syscall => {
                     //check if first value is an integer
-                    if arglist.len().clone() != 5 {
-                        return Err("[Syscall] system call expects 5 arguments.".to_owned());
+                    if arglist.len() != 5 {
+                        log::error!("got {}", arglist.len());
+                        return Err("[Syscall] system call expects 5 arguments. ".to_owned());
                     }
                     let mut iter = arglist.iter_mut();
                     if let Some(i) = iter.next() {
@@ -88,6 +89,34 @@ impl ASTNode {
                     }
                     Ok(())
                     //check if sec
+                }
+                STDLibFunction::Setaddr => {
+                    if arglist.len() != 2 {
+                        return Err("[Setaddr] expects 2 arguments.".to_owned());
+                    }
+                    let mut iter = arglist.iter_mut();
+                    if let Some(i) = iter.next() {
+                        if let Some(t) = i.getexprtype() {
+                            if t.get_base_type() != ASTExprType::Primitive(PrimitiveType::Int) {
+                                return Err("[Setaddr] the first argument is not a pointer or raw address expression.".to_owned());
+                            }
+                        }
+                    }
+                    Ok(())
+                }
+                STDLibFunction::Getaddr => {
+                    if arglist.len() != 1 {
+                        return Err("[Getaddr] expects 1 argument.".to_owned());
+                    }
+                    let mut iter = arglist.iter_mut();
+                    if let Some(i) = iter.next() {
+                        if let Some(t) = i.getexprtype() {
+                            if t.get_base_type() != ASTExprType::Primitive(PrimitiveType::Int) {
+                                return Err("[Getaddr] the first argument is not a pointer or raw address expression.".to_owned());
+                            }
+                        }
+                    }
+                    Ok(())
                 }
                 _ => Err("Std function Unimplemented!".to_owned()),
             },
@@ -462,6 +491,16 @@ impl ASTNode {
     }
     pub fn getexprtype(&mut self) -> Option<ASTExprType> {
         match self {
+            ASTNode::StdFuncCallNode { func, arglist: _ } => match func {
+                STDLibFunction::Heapset => Some(ASTExprType::Primitive(PrimitiveType::Int)),
+                STDLibFunction::Free => Some(ASTExprType::Primitive(PrimitiveType::Int)),
+                STDLibFunction::Alloc => Some(ASTExprType::Primitive(PrimitiveType::Int)),
+                STDLibFunction::Getaddr => Some(ASTExprType::Primitive(PrimitiveType::Int)),
+                STDLibFunction::Setaddr => Some(ASTExprType::Primitive(PrimitiveType::Void)),
+                STDLibFunction::Syscall => Some(ASTExprType::Primitive(PrimitiveType::Void)),
+                STDLibFunction::Read => Some(ASTExprType::Primitive(PrimitiveType::Void)),
+                STDLibFunction::Write => Some(ASTExprType::Primitive(PrimitiveType::Void)),
+            },
             ASTNode::ErrorNode { err } => match err {
                 ASTError::TypeError(s) => {
                     exit_on_err(s.to_owned());

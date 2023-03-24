@@ -6,6 +6,7 @@
 %avoid_insert "MULTI_COMMENT"
 %avoid_insert "STR_T"
 %avoid_insert "INT_T"
+%token 'SINGLE_COMMENT'
 %token "BEGIN"
 %token "END"
 %token "READ"
@@ -554,10 +555,21 @@ Stmt -> Result<ASTNode,String>:
 	}
 	| 'SYSCALL' '(' ArgList ')' ';'
 	{
-		Ok(ASTNode::StdFuncCallNode{
+		let mut node = ASTNode::StdFuncCallNode{
 			func: STDLibFunction::Syscall,
 			arglist: Box::new($3?),
-		})
+		};
+		node.validate()?;
+		Ok(node)
+	}
+	| 'SETADDR' '(' ArgList ')' ';'
+	{
+		let mut node = ASTNode::StdFuncCallNode{
+			func: STDLibFunction::Setaddr,
+			arglist: Box::new($3?),
+		};
+		node.validate()?;
+		Ok(node)
 	}
 	;
 WhileStmt -> Result<ASTNode,String>:
@@ -863,6 +875,15 @@ StdFuncCall -> Result<ASTNode,String>:
 			exprtype: Some(ASTExprType::Primitive(PrimitiveType::Int)),
 			ptr: Box::new($3?),
 			depth: None,
+		};
+		node.validate()?;
+		Ok(node)
+	}
+	| 'GETADDR' '(' ArgList ')'
+	{
+		let mut node = ASTNode::StdFuncCallNode{
+			func: STDLibFunction::Getaddr,
+			arglist: Box::new($3?),
 		};
 		node.validate()?;
 		Ok(node)

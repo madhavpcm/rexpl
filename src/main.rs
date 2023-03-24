@@ -1,7 +1,8 @@
 // TODO call to undefined functions
 // TODO Strict Ownership things for type system
 // TODO Deref for expressions dot arrow lists : needs alot of parser work and refactoring
-// TODO Alloc() Free() Initialize() test; Buddy System
+// TODO Buddy System
+// TODO Return statement check for a function
 use env_logger::{Builder, Env};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
