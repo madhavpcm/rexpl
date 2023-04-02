@@ -1,8 +1,12 @@
-// TODO call to undefined functions
 // TODO Strict Ownership things for type system
+// Stage 5
+// TODO Return statement check for a function
+// Stage 6
 // TODO Deref for expressions dot arrow lists : needs alot of parser work and refactoring
 // TODO Buddy System
-// TODO Return statement check for a function
+// Stage 7
+// TODO Arrow/Dotptr through func calls
+// validating func calls from arrow
 use env_logger::{Builder, Env};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;

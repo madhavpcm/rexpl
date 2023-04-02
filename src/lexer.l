@@ -31,6 +31,9 @@ initialize "INIT"
 syscall "SYSCALL"
 setaddr 'SETADDR'
 getaddr 'GETADDR'
+class 'CLASS'
+endclass 'ENDCLASS'
+this 'THIS'
 
 [.] "DOT"
 -> "ARROW"

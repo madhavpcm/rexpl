@@ -166,14 +166,13 @@ impl ASTNode {
                     if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
                         break;
                     }
-                    if dotptr != &ASTNode::Void {
-                        if let ASTNode::VAR {
+                    match dotptr {
+                        ASTNode::VAR {
                             name: nname,
                             array_access,
                             dot_field_access,
                             arrow_field_access,
-                        } = dotptr
-                        {
+                        } => {
                             if array_access.len() > 0 {
                                 return Err(
                                     "Arrays inside struct is not implemented yet!".to_owned()
@@ -190,20 +189,31 @@ impl ASTNode {
                             dotptr = &mut **dot_field_access;
                             arrowptr = &mut **arrow_field_access;
                             continue;
-                        } else {
+                        }
+                        ASTNode::FuncCallNode { fname, arglist } => {
+                            //check if currtype is class
+                            //check if fname is in currtype
+                            //set currtype as return value of fname
+                            if !currtype.is_class() {
+                                return Err("Method [".to_owned()
+                                    + fname.as_str()
+                                    + "] is not part of any class.");
+                            }
+                            currtype.get_method_id(fname, arglist)?;
+                        }
+                        ASTNode::Void => {}
+                        _ => {
                             return Err("Dot operator can only be used to access [struct_t] types"
                                 .to_owned());
                         }
                     }
-                    // check if dot field type is
-                    if arrowptr != &ASTNode::Void {
-                        if let ASTNode::VAR {
+                    match arrowptr {
+                        ASTNode::VAR {
                             name: nname,
                             array_access,
                             dot_field_access,
                             arrow_field_access,
-                        } = arrowptr
-                        {
+                        } => {
                             if array_access.len() > 0 {
                                 return Err(
                                     "Arrays inside struct is not implemented yet!".to_owned()
@@ -223,12 +233,13 @@ impl ASTNode {
                             }
                             //TODO validate array access
                             //validate_field_array_access(nname, &currtype, array_access)?;
-                        } else {
-                            return Err(
-                                "Arrow operator can only be used to access [struct_t*] types"
-                                    .to_owned(),
-                            );
                         }
+                        ASTNode::Void => {}
+                        ASTNode::FuncCallNode { fname, arglist } => {
+                            //check if currtype is class
+                            //check if fname is in currtype
+                        }
+                        _ => return Err("Arrow operator expects a field/method".to_owned()),
                     }
                 }
                 Ok(())
@@ -808,7 +819,7 @@ pub fn varinscope(name: &String) -> Result<(), String> {
 /*
  * Function to validate the pamalist in declaration to definition
  */
-fn compare_arglist_paramlist(
+pub fn compare_arglist_paramlist(
     fname: &mut String,
     arglist: &mut LinkedList<ASTNode>,
     paramlist: &mut LinkedList<VarNode>,
