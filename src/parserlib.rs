@@ -186,7 +186,7 @@ impl TypeTable {
     ) -> Result<(), String> {
         let tname = &*CLASSNAME.lock().unwrap();
         let map = &mut self.table;
-        let mut classentry = TYPE_TABLE.lock().unwrap().tt_get_type(tname)?;
+        let classentry = TYPE_TABLE.lock().unwrap().tt_get_type(tname)?;
         if classentry.size()? + tmethods.len() > 8 {
             return Err("Type [".to_owned() + tname + "] has more than 8 .");
         }
@@ -329,7 +329,7 @@ impl TypeTable {
                         }
                     }
                 }
-                FieldType::Class(s) => {
+                FieldType::Class(_) => {
                     return Err("Classes are not allowed inside structs.".to_owned())
                 }
             };
@@ -478,7 +478,7 @@ pub struct ASTClassType {
 }
 
 impl PartialEq for ASTClassType {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, _other: &Self) -> bool {
         exit_on_err("PartialEq not implemented for astclasstype.".to_owned());
         false
     }
@@ -521,29 +521,36 @@ impl ASTExprType {
             }
         }
     }
-    pub fn get_method_id(
+    pub fn is_method(
         &self,
         mname: &String,
         arglist: &LinkedList<ASTNode>,
-    ) -> Result<i64, String> {
+    ) -> Result<ASTExprType, String> {
         match self {
             ASTExprType::Class(c) => {
                 if let Some(entry) = c.symbol_table.table.get(mname) {
                     match entry {
                         CSymbol::Func {
-                            name,
+                            name: _,
                             ret_type,
                             paramlist,
-                            flabel,
-                            fid,
-                        } => Ok(*fid),
-                        _ => Err("Method declared as var ".to_owned()),
+                            flabel: _,
+                            fid: _,
+                        } => {
+                            compare_arglist_paramlist(
+                                &mut mname.clone(),
+                                &mut arglist.clone(),
+                                &mut paramlist.clone(),
+                            )?;
+                            Ok(ret_type.clone())
+                        }
+                        _ => Err("[".to_owned() + mname + "] is declared as a field."),
                     }
                 } else {
                     Err("Method not found.".to_owned())
                 }
             }
-            _ => Err("Method only allowed inside classes.".to_owned()),
+            _ => Err("Methods are only allowed inside classes.".to_owned()),
         }
     }
     pub fn get_field_type(&self, fname: &String) -> Result<ASTExprType, String> {
@@ -571,11 +578,11 @@ impl ASTExprType {
         match self {
             ASTExprType::Class(c) => {
                 if let Some(CSymbol::Func {
-                    name,
-                    ret_type,
+                    name: _,
+                    ret_type: _,
                     paramlist,
-                    flabel,
-                    fid,
+                    flabel: _,
+                    fid: _,
                 }) = c.symbol_table.table.get(fname)
                 {
                     let mut fname = fname.clone();
@@ -619,7 +626,7 @@ impl ASTExprType {
                             name: _,
                             ret_type: _,
                             paramlist: _,
-                            flabel,
+                            flabel: _,
                             fid,
                         } => fid,
                     };

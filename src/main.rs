@@ -4,9 +4,11 @@
 // Stage 6
 // TODO Deref for expressions dot arrow lists : needs alot of parser work and refactoring
 // TODO Buddy System
+// TODO validate array access
 // Stage 7
 // TODO Arrow/Dotptr through func calls
-// validating func calls from arrow
+// TODO validating func calls from arrow
+// TODO extend dotfield and arrow field through function calls
 use env_logger::{Builder, Env};
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;

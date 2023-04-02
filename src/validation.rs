@@ -199,7 +199,8 @@ impl ASTNode {
                                     + fname.as_str()
                                     + "] is not part of any class.");
                             }
-                            currtype.get_method_id(fname, arglist)?;
+                            currtype.is_method(fname, arglist)?;
+                            break;
                         }
                         ASTNode::Void => {}
                         _ => {
@@ -231,14 +232,20 @@ impl ASTNode {
                             } else {
                                 return Err("Dot operator expects a variable name".to_owned());
                             }
-                            //TODO validate array access
                             //validate_field_array_access(nname, &currtype, array_access)?;
                         }
-                        ASTNode::Void => {}
                         ASTNode::FuncCallNode { fname, arglist } => {
                             //check if currtype is class
                             //check if fname is in currtype
+                            if !currtype.is_class() {
+                                return Err("Method [".to_owned()
+                                    + fname.as_str()
+                                    + "] is not part of any class.");
+                            }
+                            currtype.is_method(fname, arglist)?;
+                            break;
                         }
+                        ASTNode::Void => {}
                         _ => return Err("Arrow operator expects a field/method".to_owned()),
                     }
                 }
@@ -541,14 +548,13 @@ impl ASTNode {
                         if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
                             break;
                         }
-                        if dotptr != &ASTNode::Void {
-                            if let ASTNode::VAR {
+                        match dotptr {
+                            ASTNode::VAR {
                                 name: nname,
-                                array_access: _,
+                                array_access,
                                 dot_field_access,
                                 arrow_field_access,
-                            } = dotptr
-                            {
+                            } => {
                                 if array_access.len() > 0 {
                                     exit_on_err(
                                         "Arrays inside structs are not implemented yet.".to_owned(),
@@ -561,15 +567,22 @@ impl ASTNode {
                                 dotptr = &**dot_field_access;
                                 arrowptr = &**arrow_field_access;
                             }
+                            ASTNode::FuncCallNode { fname, arglist } => {
+                                vtype = vtype.is_method(fname, arglist).unwrap();
+                                break;
+                            }
+                            ASTNode::Void => {}
+                            _ => {
+                                unreachable!()
+                            }
                         }
-                        if arrowptr != &ASTNode::Void {
-                            if let ASTNode::VAR {
+                        match arrowptr {
+                            ASTNode::VAR {
                                 name: nname,
                                 array_access,
                                 dot_field_access,
                                 arrow_field_access,
-                            } = arrowptr
-                            {
+                            } => {
                                 if array_access.len() > 0 {
                                     exit_on_err(
                                         "Arrays inside structs are not implemented yet.".to_owned(),
@@ -588,6 +601,17 @@ impl ASTNode {
                                     );
                                 }
                             }
+                            ASTNode::FuncCallNode { fname, arglist } => {
+                                if let ASTExprType::Pointer(etype) = &vtype {
+                                    vtype = etype.is_method(fname, arglist).unwrap();
+                                    break;
+                                } else {
+                                    exit_on_err(
+                                        "Arrow operator expects a variable of struct_t*".to_owned(),
+                                    );
+                                }
+                            }
+                            _ => unreachable!(),
                         }
                     }
                     return Some(vtype);
@@ -844,20 +868,4 @@ pub fn compare_arglist_paramlist(
         ctr = ctr + 1;
     }
     Ok(())
-}
-//Gets the label of a function
-pub fn get_function_label(fname: &String) -> usize {
-    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-    if let Some(entry) = gst.get(fname) {
-        return match entry {
-            GSymbol::Func {
-                ret_type: _,
-                paramlist: _,
-                flabel,
-            } => flabel.clone(),
-            _ => LABEL_NOT_FOUND,
-        };
-    } else {
-        LABEL_NOT_FOUND
-    }
 }

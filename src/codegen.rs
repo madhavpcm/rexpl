@@ -29,8 +29,55 @@ lazy_static! {
     pub static ref REGISTER_STACK: Mutex<Vec<Vec<(bool, i64)>>> = Mutex::new(Vec::default());
     //TODO remove this stack
     pub static ref FSTACK: Mutex<(String,i64)> = Mutex::new((String::default(),0));
+    pub static ref CLASSNAME: Mutex<String> = Mutex::new(String::default());
+}
+//Gets the label of a function
+pub fn get_function_label(fname: &String) -> usize {
+    let cn = CLASSNAME.lock().unwrap();
+    if cn.len() > 0 {
+        let tt = TYPE_TABLE.lock().unwrap();
+        if let ASTExprType::Class(p) = tt.tt_get_type(&*cn).unwrap() {
+            if let Some(entry) = p.symbol_table.table.get(fname) {
+                match entry {
+                    CSymbol::Func {
+                        name: _,
+                        ret_type: _,
+                        paramlist: _,
+                        flabel,
+                        fid: _,
+                    } => *flabel,
+                    _ => LABEL_NOT_FOUND,
+                }
+            } else {
+                LABEL_NOT_FOUND
+            }
+        } else {
+            LABEL_NOT_FOUND
+        }
+    } else {
+        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+        if let Some(entry) = gst.get(&__get_table_id(fname)) {
+            return match entry {
+                GSymbol::Func {
+                    ret_type: _,
+                    paramlist: _,
+                    flabel,
+                } => flabel.clone(),
+                _ => LABEL_NOT_FOUND,
+            };
+        } else {
+            LABEL_NOT_FOUND
+        }
+    }
 }
 
+/*
+ * Internally, functions are have different key value
+ */
+fn __get_table_id(fname: &String) -> String {
+    let cname = CLASSNAME.lock().unwrap();
+    fname.clone() + "#" + cname.as_str()
+}
 //Wrap error and write to file
 fn write_line(mut writer: &File, args: std::fmt::Arguments) {
     if let Err(e) = writeln!(writer, "{}", args) {
@@ -43,7 +90,7 @@ fn write_line(mut writer: &File, args: std::fmt::Arguments) {
 fn __get_function_storage(fname: &String) -> i64 {
     let ft = FUNCTION_TABLE.lock().unwrap();
     let mut max_size = 0;
-    if let Some(entry) = ft.get(fname) {
+    if let Some(entry) = ft.get(&__get_table_id(fname)) {
         for (
             _k,
             LSymbol::Var {
@@ -202,6 +249,21 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
  */
 fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
     match root {
+        ASTNode::ClassNode { cname, methods } => {
+            //gen code for every method inside class
+            let mut cn = CLASSNAME.lock().unwrap();
+            *cn = cname.clone();
+            std::mem::drop(cn);
+
+            for i in methods.iter() {
+                __code_gen(i, file, false);
+            }
+
+            let mut cn = CLASSNAME.lock().unwrap();
+            *cn = "".to_owned();
+            std::mem::drop(cn);
+            CONN_RETURN
+        }
         ASTNode::ErrorNode { err } => {
             let err: String = match err {
                 ASTError::TypeError(s) => s.to_owned(),
@@ -236,7 +298,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
-            let baseaddrreg = __load_variable(file, name);
+            let mut baseaddrreg = __load_variable(file, name);
 
             let mut registers = REGISTERS.lock().unwrap();
             registers[baseaddrreg].1 =
@@ -274,14 +336,13 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
                     break;
                 }
-                if dotptr != &ASTNode::Void {
-                    if let ASTNode::VAR {
+                match dotptr {
+                    ASTNode::VAR {
                         name: nname,
                         array_access: _,
                         dot_field_access,
                         arrow_field_access,
-                    } = dotptr
-                    {
+                    } => {
                         let field_offset = currtype.get_field_id(nname).unwrap();
                         currtype = currtype.get_field_type(nname).unwrap();
                         write_line(file, format_args!("ADD R{}, {}", baseaddrreg, field_offset));
@@ -289,16 +350,41 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         arrowptr = &**arrow_field_access;
                         continue;
                     }
+                    ASTNode::FuncCallNode { fname, arglist } => {
+                        //push contents of baseaddr reg first
+                        //Save Live registers except ret_reg
+                        __backup_registers(file);
+                        //Push Self addr
+                        write_line(file, format_args!("PUSH R{}", baseaddrreg));
+                        //Push Arguments
+                        __push_args(file, arglist, refr);
+                        //Push return value
+                        write_line(file, format_args!("ADD SP, {}", 1));
+                        write_line(file, format_args!("CALL L{}", &__get_table_id(fname)));
+                        let ret_reg = __get_safe_register();
+                        //extract return register
+                        write_line(file, format_args!("POP R{}", ret_reg));
+                        //remove arguments
+                        write_line(file, format_args!("SUB SP, {}", (&**arglist).len() + 1));
+                        //Restore live registers except_ret_reg
+                        __restore_registers(file, ret_reg);
+                        write_line(file, format_args!("MOV R{}, R{}", baseaddrreg, ret_reg));
+                        baseaddrreg = ret_reg;
+                        free_reg(ret_reg);
+                        return baseaddrreg;
+                    }
+                    ASTNode::Void => {}
+                    _ => {
+                        unreachable!();
+                    }
                 }
-                // check if dot field type is
-                if arrowptr != &ASTNode::Void {
-                    if let ASTNode::VAR {
+                match arrowptr {
+                    ASTNode::VAR {
                         name: nname,
                         array_access: _,
                         dot_field_access,
                         arrow_field_access,
-                    } = arrowptr
-                    {
+                    } => {
                         if let ASTExprType::Pointer(etype) = &currtype {
                             write_line(
                                 file,
@@ -314,6 +400,36 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                             arrowptr = &**arrow_field_access;
                             continue;
                         }
+                    }
+                    ASTNode::FuncCallNode { fname, arglist } => {
+                        //push contents of baseaddr reg first
+                        //Save Live registers except ret_reg
+                        write_line(
+                            file,
+                            format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
+                        );
+                        __backup_registers(file);
+                        //Push Self addr
+                        write_line(file, format_args!("PUSH R{}", baseaddrreg));
+                        //Push Arguments
+                        __push_args(file, arglist, refr);
+                        //Push return value
+                        write_line(file, format_args!("ADD SP, {}", 1));
+                        write_line(file, format_args!("CALL L{}", &__get_table_id(fname)));
+                        let ret_reg = __get_safe_register();
+                        //extract return register
+                        write_line(file, format_args!("POP R{}", ret_reg));
+                        //remove arguments
+                        write_line(file, format_args!("SUB SP, {}", (&**arglist).len() + 1));
+                        //Restore live registers except_ret_reg
+                        __restore_registers(file, ret_reg);
+                        write_line(file, format_args!("MOV R{}, R{}", baseaddrreg, ret_reg));
+                        baseaddrreg = ret_reg;
+                        free_reg(ret_reg);
+                        return baseaddrreg;
+                    }
+                    _ => {
+                        unreachable!();
                     }
                 }
             }
@@ -825,7 +941,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 format_args!("ADD SP, {}", __get_function_storage(fname)),
             );
             let ft = FUNCTION_TABLE.lock().unwrap();
-            if let Some(_local_table) = ft.get(fname) {
+            if let Some(_local_table) = ft.get(&__get_table_id(fname)) {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();

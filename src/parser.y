@@ -257,16 +257,14 @@ FDef ->Result<ASTNode,String>:
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
 		let mut lv = LOCALVARID.lock().unwrap();
+		let cname = CLASSNAME.lock().unwrap();
 		ft.insert(
-			funcname,
+			funcname + "#" + cname.as_str(),
 			lst.clone()
 		);
 		//reset data structures
 		*lst = HashMap::default();
 		*lv = 1;
-		std::mem::drop(lv);
-		std::mem::drop(lst);
-		std::mem::drop(ft);
 		Ok(node)
 	}
 	;
@@ -281,38 +279,35 @@ ParamListBlock -> Result<LinkedList<VarNode>,String>:
 	ParamList 
 	{
 		let mtt = TYPE_TABLE.lock().unwrap();
+		let mut ll: LinkedList<VarNode> = LinkedList::new();
 		if CLASSNAME.lock().unwrap().len() > 0 {
-			let mut varnode = VarNode {
+			ll = LinkedList::from( VarNode {
 				varname: "self".to_owned(),
 				vartype: ASTExprType::Pointer(Box::new(mtt.tt_get_type(&*CLASSNAME.lock().unwrap())?)),
 				varindices: vec![],
-			};
-			varnode.install_to_lst();
+			});
 		}
-		std::mem::drop(mtt);
-		let mut node = $1?;
+		ll.append(&mut $1?);
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		*lst = HashMap::default();
-		std::mem::drop(lst);
-		__lst_install_params(&mut node)?;
-		Ok(node)
+		__lst_install_params(&mut ll)?;
+		Ok(ll)
 	}
 	|
 	{
 		let mtt = TYPE_TABLE.lock().unwrap();
+		let mut ll: LinkedList<VarNode> = LinkedList::new();
 		if CLASSNAME.lock().unwrap().len() > 0 {
-			let mut varnode = VarNode {
+			ll = LinkedList::from(VarNode {
 				varname: "self".to_owned(),
 				vartype: ASTExprType::Pointer(Box::new(mtt.tt_get_type(&*CLASSNAME.lock().unwrap())?)),
 				varindices: vec![],
-			};
-			varnode.install_to_lst();
+			});
 		}
-		std::mem::drop(mtt);
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		*lst = HashMap::default();
-		std::mem::drop(lst);
-		Ok(LinkedList::new())
+		__lst_install_params(&mut ll)?;
+		Ok(ll)
 	}
 	;
 
