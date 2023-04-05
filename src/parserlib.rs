@@ -185,11 +185,8 @@ impl TypeTable {
         tmethods: &mut LinkedList<CSymbol>,
     ) -> Result<(), String> {
         let tname = &*CLASSNAME.lock().unwrap();
+        let classentry = self.tt_get_type(tname)?;
         let map = &mut self.table;
-        let classentry = TYPE_TABLE.lock().unwrap().tt_get_type(tname)?;
-        if classentry.size()? + tmethods.len() > 8 {
-            return Err("Type [".to_owned() + tname + "] has more than 8 .");
-        }
         let mut label_count = LABEL_COUNT.lock().unwrap();
         let mut cstruct;
         if let ASTExprType::Class(c) = classentry {
@@ -255,6 +252,7 @@ impl TypeTable {
         if map.contains_key(tname) {
             return Err("Type [".to_owned() + tname + "] is already declared.");
         }
+        std::mem::drop(map);
         if tfields.len() > 8 {
             return Err("Type [".to_owned() + tname + "] has more than 8 .");
         }
@@ -284,6 +282,16 @@ impl TypeTable {
             }
             //validate the type
         }
+        let map = &mut self.table;
+        map.insert(
+            tname.clone(),
+            ASTExprType::Class(ASTClassType {
+                name: (tname.clone()),
+                fieldsize: (fieldid),
+                methodsize: (0),
+                symbol_table: (ctable),
+            }),
+        );
         Ok(())
     }
     pub fn tinstall_struct(
@@ -479,8 +487,7 @@ pub struct ASTClassType {
 
 impl PartialEq for ASTClassType {
     fn eq(&self, _other: &Self) -> bool {
-        exit_on_err("PartialEq not implemented for astclasstype.".to_owned());
-        false
+        return self.name == _other.name;
     }
 }
 impl Eq for ASTClassType {}
@@ -564,8 +571,26 @@ impl ASTExprType {
                 Err("Field [".to_owned()
                     + fname.as_str()
                     + "] not declared inside type ["
-                    + fname.as_str()
+                    + s.name.as_str()
                     + "]")
+            }
+            ASTExprType::Class(c) => {
+                if let Some(entry) = c.symbol_table.table.get(fname) {
+                    match entry {
+                        CSymbol::Var {
+                            name: _, vartype, ..
+                        } => vartype.as_astexprtype(),
+                        CSymbol::Func {
+                            name: _, ret_type, ..
+                        } => Ok(ret_type.clone()),
+                    }
+                } else {
+                    Err("Field [".to_owned()
+                        + fname.as_str()
+                        + "] not present in ["
+                        + c.name.as_str()
+                        + "] class")
+                }
             }
             _ => Err("Expression of this type cannot be accessed.".to_owned()),
         }
@@ -595,6 +620,13 @@ impl ASTExprType {
                 }
             }
             _ => Err("Method called to non class type.".to_owned()),
+        }
+    }
+    pub fn get_type_name(&self) -> Result<String, String> {
+        match self {
+            ASTExprType::Struct(s) => Ok(s.name.clone()),
+            ASTExprType::Class(c) => Ok(c.name.clone()),
+            _ => unreachable!(),
         }
     }
     pub fn get_field_id(&self, fname: &String) -> Result<usize, String> {
@@ -781,7 +813,7 @@ impl VarNode {
         }
         if lst.contains_key(&self.varname) == true {
             exit_on_err(
-                "Parameter Symbol ".to_owned() + &self.varname.as_str() + " is already declared ",
+                "Parameter Symbol [".to_owned() + &self.varname.as_str() + "] is already declared ",
             );
         }
     }

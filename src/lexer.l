@@ -34,6 +34,7 @@ getaddr 'GETADDR'
 class 'CLASS'
 endclass 'ENDCLASS'
 this 'THIS'
+div 'DIV'
 
 [.] "DOT"
 -> "ARROW"

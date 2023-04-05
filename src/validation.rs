@@ -195,9 +195,9 @@ impl ASTNode {
                             //check if fname is in currtype
                             //set currtype as return value of fname
                             if !currtype.is_class() {
-                                return Err("Method [".to_owned()
-                                    + fname.as_str()
-                                    + "] is not part of any class.");
+                                return Err("Type [".to_owned()
+                                    + name.as_str()
+                                    + "] is not a class type to call methods.");
                             }
                             currtype.is_method(fname, arglist)?;
                             break;
@@ -230,20 +230,28 @@ impl ASTNode {
                                 arrowptr = &mut **arrow_field_access;
                                 continue;
                             } else {
-                                return Err("Dot operator expects a variable name".to_owned());
+                                return Err(
+                                    "Arrow operator can only be used to pointer types".to_owned()
+                                );
                             }
                             //validate_field_array_access(nname, &currtype, array_access)?;
                         }
                         ASTNode::FuncCallNode { fname, arglist } => {
                             //check if currtype is class
                             //check if fname is in currtype
-                            if !currtype.is_class() {
-                                return Err("Method [".to_owned()
-                                    + fname.as_str()
-                                    + "] is not part of any class.");
+                            if let ASTExprType::Pointer(etype) = &currtype {
+                                if !etype.is_class() {
+                                    return Err("Type [".to_owned()
+                                        + name.as_str()
+                                        + "] is not a class type to call methods.");
+                                }
+                                etype.is_method(fname, arglist)?;
+                                break;
+                            } else {
+                                return Err(
+                                    "Arrow operator can only be used to pointer types".to_owned()
+                                );
                             }
-                            currtype.is_method(fname, arglist)?;
-                            break;
                         }
                         ASTNode::Void => {}
                         _ => return Err("Arrow operator expects a field/method".to_owned()),
@@ -476,36 +484,84 @@ impl ASTNode {
                 body: _,
                 paramlist: a,
             } => {
-                let gst = GLOBALSYMBOLTABLE.lock().unwrap();
-                if let Some(entry) = gst.get(&fname.clone()) {
-                    match entry {
-                        GSymbol::Var {
-                            vartype: _,
-                            varid: _,
-                            varindices: _,
-                        } => Err("Function with name [".to_owned()
-                            + fname.as_str()
-                            + "]is already declared as a variable"),
-                        GSymbol::Func {
-                            ret_type: r2,
-                            paramlist: b,
-                            flabel: _,
-                        } => {
-                            if r1 != r2 {
-                                return Err("Function [".to_owned()
-                                    + fname.as_str()
-                                    + "]'s return type doesn't match in it declaration");
+                let cn = CLASSNAME.lock().unwrap();
+                if cn.len() > 0 {
+                    let classentry = TYPE_TABLE.lock().unwrap().tt_get_type(&*cn)?;
+                    let ce = classentry.clone();
+                    match classentry {
+                        ASTExprType::Class(c) => {
+                            if let Some(m) = c.symbol_table.table.get(fname) {
+                                match m {
+                                    CSymbol::Func {
+                                        name: _,
+                                        ret_type: r2,
+                                        paramlist: b,
+                                        ..
+                                    } => {
+                                        if r1 != r2 {
+                                            return Err("Function [".to_owned()
+                                        + fname.as_str()
+                                        + "]'s return type doesn't match in it declaration");
+                                        }
+                                        let mut l = b.clone();
+                                        l.push_front(VarNode {
+                                            varname: "self".to_owned(),
+                                            vartype: ASTExprType::Pointer(Box::new(ce)),
+                                            varindices: vec![],
+                                        });
+                                        if a != &l {
+                                            return Err("Function [".to_owned()
+                                        + fname.as_str()
+                                        + "]'s parameter list doesn't match in it declaration");
+                                        }
+                                        Ok(())
+                                    }
+                                    _ => {
+                                        return Err("Function [".to_owned()
+                                            + fname.as_str()
+                                            + "] is declared as a field.");
+                                    }
+                                }
+                            } else {
+                                Err("Func with name [".to_owned()
+                                    + fname
+                                    + "] is not declared in class ["
+                                    + cn.as_str()
+                                    + "]")
                             }
-                            if a != b {
-                                return Err("Function [".to_owned()
-                                    + fname.as_str()
-                                    + "]'s parameter list doesn't match in it declaration");
-                            }
-                            Ok(())
                         }
+                        _ => Err("Func def must be inside classdef.".to_owned()),
                     }
                 } else {
-                    Err("Function with name [".to_owned() + fname.as_str() + "] is not declared")
+                    let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+                    if let Some(entry) = gst.get(&fname.clone()) {
+                        match entry {
+                            GSymbol::Var { .. } => Err("Function with name [".to_owned()
+                                + fname.as_str()
+                                + "]is already declared as a variable"),
+                            GSymbol::Func {
+                                ret_type: r2,
+                                paramlist: b,
+                                flabel: _,
+                            } => {
+                                if r1 != r2 {
+                                    return Err("Function [".to_owned()
+                                        + fname.as_str()
+                                        + "]'s return type doesn't match in it declaration");
+                                }
+                                if a != b {
+                                    return Err("Function [".to_owned()
+                                        + fname.as_str()
+                                        + "]'s parameter list doesn't match in it declaration");
+                                }
+                                Ok(())
+                            }
+                        }
+                    } else {
+                        Err("Function with name [".to_owned()
+                            + fname.as_str()
+                            + "] is not declared")
+                    }
                 }
             }
             _ => Ok(()),

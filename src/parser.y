@@ -79,22 +79,28 @@ Start -> Result<ASTNode,String>:
 	TypeDefBlock ClassDefBlock GDeclBlock FDefBlock MainBlock
 	{
 		$1?;
-		$2?;
+		$3?;
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
-			lhs : Box::new($4?),
+			lhs : Box::new(ASTNode::BinaryNode{
+				op: ASTNodeType::Connector,
+				exprtype: Some(ASTExprType::Primitive(PrimitiveType::Void)),
+				lhs: Box::new($2?),
+				rhs: Box::new($4?),
+			}),
 			rhs : Box::new($5?),
 		})
 	}
-	| TypeDefBlock GDeclBlock MainBlock
+	| TypeDefBlock ClassDefBlock GDeclBlock MainBlock
 	{
 		$1?;
+		$3?;
 		Ok(ASTNode::BinaryNode{
 			op : ASTNodeType::Connector,
             exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
-			lhs : Box::new($3?),
-			rhs : Box::new(ASTNode::Void),
+			lhs : Box::new($2?),
+			rhs : Box::new($4?),
 		})
 	}
 	;
@@ -114,7 +120,7 @@ MainBlock -> Result<ASTNode,String>:
 		let mut ft = FUNCTION_TABLE.lock().unwrap();
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		ft.insert(
-			"main".to_string(),
+			"main#".to_string(),
 			lst.clone()
 		);
 		lst.clear();
@@ -290,6 +296,8 @@ ParamListBlock -> Result<LinkedList<VarNode>,String>:
 		ll.append(&mut $1?);
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		*lst = HashMap::default();
+		std::mem::drop(mtt);
+		std::mem::drop(lst);
 		__lst_install_params(&mut ll)?;
 		Ok(ll)
 	}
@@ -306,6 +314,8 @@ ParamListBlock -> Result<LinkedList<VarNode>,String>:
 		}
 		let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
 		*lst = HashMap::default();
+		std::mem::drop(mtt);
+		std::mem::drop(lst);
 		__lst_install_params(&mut ll)?;
 		Ok(ll)
 	}
@@ -908,6 +918,8 @@ FieldPtr-> Result<FieldType,String>:
 
 ClassDefBlock -> Result<ASTNode,String>:
 	'CLASS' ClassDefList 'ENDCLASS' { $2 }
+	| 'CLASS' 'ENDCLASS' { Ok(ASTNode::Void) }
+	| { Ok(ASTNode::Void) }
 	;
 
 ClassDefList -> Result<ASTNode,String>:
@@ -948,10 +960,10 @@ ClassName -> Result<String,String>:
 	;
 
 ClassDeclBlock -> Result<(),String>:
-	'DECL' ClassFieldBlock ClassMethodDeclList 'ENDDECL'
+	'DECL' ClassFieldBlock 'DIV' ClassMethodDeclList 'ENDDECL'
 	{
 		$2?;
-		let mut methods = $3?;
+		let mut methods = $4?;
 		let mut mtt = TYPE_TABLE.lock().unwrap();
 		mtt.tinstall_class_methods(&mut methods)?;
 		Ok(())
@@ -961,11 +973,12 @@ ClassDeclBlock -> Result<(),String>:
 
 ClassFieldBlock -> Result<(), String>:
 	ClassFieldList { let mut fields = $1?;let mut mtt = TYPE_TABLE.lock().unwrap();mtt.tinstall_class_fields(&mut fields)?;Ok(()) }
-	| { let mut mtt=TYPE_TABLE.lock().unwrap();mtt.tinstall_class_fields(&mut LinkedList::new())?;Ok(()) }
+    | { let mut mtt = TYPE_TABLE.lock().unwrap();mtt.tinstall_class_fields(&mut LinkedList::new())?;Ok(()) }
 	;
 
 ClassFieldList -> Result<LinkedList<CSymbol>,String>:
-	ClassFieldList ClassField { let mut f1 = $1?; let mut f2 = $2?; f1.append(&mut f2); Ok(f1) }
+	ClassFieldList ClassField { let mut f1 = $1?;  f1.append(&mut $2?); Ok(f1) }
+    | ClassField { $1 }
 	;
 
 ClassField -> Result<LinkedList<CSymbol>, String>:
@@ -986,11 +999,12 @@ ClassMethodBlock -> Result<LinkedList<CSymbol>,String>:
 	;
 
 ClassMethodDeclList-> Result<LinkedList<CSymbol>,String>:
-	ClassMethodDeclList ClassMethodDecl { $1?;$2 }
+	ClassMethodDeclList ClassMethodDecl { let mut ll = $1?;ll.append(&mut $2?);Ok(ll) }
+	| ClassMethodDecl { $1 }
 	;
 
 ClassMethodDecl -> Result<LinkedList<CSymbol>,String>:
-	ParamType 'VAR' '(' ParamList ')' ';' {
+	ParamType 'VAR' '(' GParamList ')' ';' {
 		let v = $2.map_err(|_| "VAR Err".to_string())?; 
 		Ok(LinkedList::from(CSymbol::Func{
 			name: $lexer.span_str(v.span()).to_owned(), 
@@ -1003,7 +1017,7 @@ ClassMethodDecl -> Result<LinkedList<CSymbol>,String>:
 	;
 
 ClassMethodDefList -> Result<LinkedList<ASTNode>,String>:
-	ClassMethodDefList FDef { let mut l1 = LinkedList::from($1?);let mut l2 =LinkedList::from($2?);l1.append(&mut l2);Ok(l1) }
+	ClassMethodDefList FDef { let mut l1 = LinkedList::from($1?);l1.append(&mut LinkedList::from($2?));Ok(l1) }
 	| FDef { Ok(LinkedList::from($1?)) }
 	;
 
