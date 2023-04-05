@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use crate::codegen::exit_on_err;
 use crate::codegen::LABEL_COUNT;
+use crate::validation::compare_arglist_paramlist;
 
 lazy_static! {
     pub static ref TYPE_TABLE: Mutex<TypeTable> = Mutex::new(TypeTable::default());
@@ -17,17 +18,31 @@ lazy_static! {
     pub static ref VARID: Mutex<usize> = Mutex::new(0);
     pub static ref LOCALSYMBOLTABLE: Mutex<HashMap<String, LSymbol>> =
         Mutex::new(HashMap::default());
+    pub static ref CLASS_RET_TYPE: Mutex<FieldType> =
+        Mutex::new(FieldType::Primitive(PrimitiveType::Null));
     pub static ref RET_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
     pub static ref DECL_TYPE: Mutex<ASTExprType> =
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
     pub static ref INITFLAG: Mutex<bool> = Mutex::new(false);
+    pub static ref CLASSNAME: Mutex<String> = Mutex::new(String::new());
 }
 pub struct TypeTable {
     pub table: HashMap<String, ASTExprType>,
 }
 pub struct GlobalSymbolTable {
     pub table: HashMap<String, GSymbol>,
+}
+#[derive(Debug, Clone)]
+pub struct ClassSymbolTable {
+    pub table: HashMap<String, CSymbol>,
+}
+impl Default for ClassSymbolTable {
+    fn default() -> ClassSymbolTable {
+        ClassSymbolTable {
+            table: (HashMap::default()),
+        }
+    }
 }
 impl Default for GlobalSymbolTable {
     fn default() -> GlobalSymbolTable {
@@ -127,7 +142,163 @@ impl TypeTable {
             false
         }
     }
-    pub fn tinstall(&mut self, tname: String, tfields: LinkedList<Field>) -> Result<(), String> {
+    fn validate_field_type(&self, this: &String, t: &FieldType) -> Result<(), String> {
+        let map = &self.table;
+        match t {
+            FieldType::Primitive(_) => Ok(()),
+            FieldType::Pointer(p) => {
+                let base = p.get_base_type();
+                match base {
+                    FieldType::Primitive(_) => Ok(()),
+                    FieldType::Struct(s) => {
+                        if map.contains_key(&s) == false {
+                            return Err("Type [".to_owned() + &s + "] is not declared.");
+                        }
+                        Ok(())
+                    }
+                    _ => {
+                        return Err("Some error".to_owned());
+                    }
+                }
+            }
+            FieldType::Struct(s) => {
+                //We can choose to disallow this
+                if map.contains_key(s) == false {
+                    return Err("Type [".to_owned() + &s + "] is not declared.");
+                }
+                Ok(())
+            }
+            FieldType::Class(s) => {
+                if s == this {
+                    return Err("Type [".to_owned() + &s + "] is incomplete.");
+                } else {
+                    if map.contains_key(s) == false {
+                        return Err("Type [".to_owned() + &s + "] is not declared.");
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+    pub fn tinstall_class_methods(
+        &mut self,
+        tmethods: &mut LinkedList<CSymbol>,
+    ) -> Result<(), String> {
+        let tname = &*CLASSNAME.lock().unwrap();
+        let classentry = self.tt_get_type(tname)?;
+        let map = &mut self.table;
+        let mut label_count = LABEL_COUNT.lock().unwrap();
+        let mut cstruct;
+        if let ASTExprType::Class(c) = classentry {
+            cstruct = c;
+        } else {
+            return Err("not a class?.".to_owned());
+        }
+        let mut fieldid: i64 = cstruct.fieldsize;
+        for i in tmethods.iter_mut() {
+            match i {
+                CSymbol::Func {
+                    name,
+                    ret_type,
+                    paramlist,
+                    flabel,
+                    fid,
+                } => {
+                    if cstruct.symbol_table.table.contains_key(name) {
+                        return Err("In class [".to_owned()
+                            + tname
+                            + "], Method ["
+                            + &name
+                            + "] is already declared as field/method.");
+                    }
+                    *flabel = *label_count;
+                    *label_count += 1;
+                    *fid = fieldid;
+                    fieldid += 1;
+                    cstruct.symbol_table.table.insert(
+                        name.clone(),
+                        CSymbol::Func {
+                            name: (name.clone()),
+                            ret_type: (ret_type.clone()),
+                            paramlist: paramlist.clone(),
+                            flabel: (flabel.clone()),
+                            fid: (fid.clone()),
+                        },
+                    );
+                }
+                _ => {
+                    unreachable!()
+                }
+            }
+        }
+        map.insert(
+            tname.clone(),
+            ASTExprType::Class(ASTClassType {
+                name: (tname.clone()),
+                fieldsize: (cstruct.fieldsize),
+                methodsize: (fieldid - cstruct.fieldsize),
+                symbol_table: (cstruct.symbol_table),
+            }),
+        );
+        Ok(())
+    }
+    //meant to be called first
+    pub fn tinstall_class_fields(
+        &mut self,
+        tfields: &mut LinkedList<CSymbol>,
+    ) -> Result<(), String> {
+        let tname = &*CLASSNAME.lock().unwrap();
+        let map = &mut self.table;
+        if map.contains_key(tname) {
+            return Err("Type [".to_owned() + tname + "] is already declared.");
+        }
+        std::mem::drop(map);
+        if tfields.len() > 8 {
+            return Err("Type [".to_owned() + tname + "] has more than 8 .");
+        }
+        let mut fieldid: i64 = 0;
+        let mut ctable: ClassSymbolTable = ClassSymbolTable::default();
+        for i in tfields.iter_mut() {
+            match i {
+                CSymbol::Var {
+                    name,
+                    vartype,
+                    varid,
+                    ..
+                } => {
+                    self.validate_field_type(tname, &vartype)?;
+                    if ctable.table.contains_key(name) {
+                        return Err("In Type [".to_owned()
+                            + tname
+                            + "], field ["
+                            + &name
+                            + "] is declared more than once.");
+                    }
+                    *varid = fieldid;
+                    fieldid += 1;
+                    ctable.table.insert(name.to_owned(), i.to_owned());
+                }
+                CSymbol::Func { .. } => unreachable!(),
+            }
+            //validate the type
+        }
+        let map = &mut self.table;
+        map.insert(
+            tname.clone(),
+            ASTExprType::Class(ASTClassType {
+                name: (tname.clone()),
+                fieldsize: (fieldid),
+                methodsize: (0),
+                symbol_table: (ctable),
+            }),
+        );
+        Ok(())
+    }
+    pub fn tinstall_struct(
+        &mut self,
+        tname: String,
+        tfields: LinkedList<Field>,
+    ) -> Result<(), String> {
         let map = &mut self.table;
         if map.contains_key(&tname) {
             return Err("Type [".to_owned() + &tname + "] is already declared.");
@@ -166,6 +337,9 @@ impl TypeTable {
                         }
                     }
                 }
+                FieldType::Class(_) => {
+                    return Err("Classes are not allowed inside structs.".to_owned())
+                }
             };
             if fieldcheck.contains(&i.name) {
                 return Err("In Type [".to_owned()
@@ -197,6 +371,30 @@ pub enum GSymbol {
     Var {
         vartype: ASTExprType,
         varid: usize,
+        varindices: Vec<usize>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct Class {
+    pub symbol_table: HashMap<String, CSymbol>,
+    pub num_methods: usize,
+    pub num_fields: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum CSymbol {
+    Func {
+        name: String,
+        ret_type: ASTExprType,
+        paramlist: LinkedList<VarNode>,
+        flabel: usize,
+        fid: i64,
+    },
+    Var {
+        name: String,
+        vartype: FieldType,
+        varid: i64,
         varindices: Vec<usize>,
     },
 }
@@ -263,6 +461,7 @@ pub enum FieldType {
     Primitive(PrimitiveType),
     Pointer(Box<FieldType>),
     Struct(String),
+    Class(String),
 }
 
 #[derive(Debug, Eq, PartialEq, Clone)]
@@ -278,9 +477,24 @@ pub struct ASTStructType {
     pub size: usize,
     pub fields: LinkedList<Field>,
 }
+#[derive(Debug, Clone)]
+pub struct ASTClassType {
+    pub name: String,
+    pub fieldsize: i64,
+    pub methodsize: i64,
+    pub symbol_table: ClassSymbolTable,
+}
+
+impl PartialEq for ASTClassType {
+    fn eq(&self, _other: &Self) -> bool {
+        return self.name == _other.name;
+    }
+}
+impl Eq for ASTClassType {}
 // an expression could be a primitive type or a pointer to a primitive type or so on..
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ASTExprType {
+    Class(ASTClassType),
     Primitive(PrimitiveType),
     Pointer(Box<ASTExprType>),
     Struct(ASTStructType),
@@ -292,18 +506,58 @@ impl FieldType {
             FieldType::Primitive(p) => Ok(ASTExprType::Primitive(p.clone())),
             FieldType::Pointer(p) => Ok(ASTExprType::Pointer(Box::new((&**p).as_astexprtype()?))),
             FieldType::Struct(p) => Ok(TYPE_TABLE.lock().unwrap().tt_get_type(p)?),
+            FieldType::Class(p) => Ok(TYPE_TABLE.lock().unwrap().tt_get_type(p)?),
         }
     }
 }
 impl ASTExprType {
+    pub fn is_class(&self) -> bool {
+        match self {
+            ASTExprType::Class(_) => true,
+            _ => false,
+        }
+    }
     pub fn size(&self) -> Result<usize, String> {
         match self {
             ASTExprType::Primitive(_) => Ok(1),
             ASTExprType::Pointer(_) => Ok(1),
             ASTExprType::Struct(s) => Ok(s.size),
+            ASTExprType::Class(s) => Ok(usize::try_from(s.methodsize + s.fieldsize).unwrap()),
             ASTExprType::Error => {
                 unreachable!()
             }
+        }
+    }
+    pub fn is_method(
+        &self,
+        mname: &String,
+        arglist: &LinkedList<ASTNode>,
+    ) -> Result<ASTExprType, String> {
+        match self {
+            ASTExprType::Class(c) => {
+                if let Some(entry) = c.symbol_table.table.get(mname) {
+                    match entry {
+                        CSymbol::Func {
+                            name: _,
+                            ret_type,
+                            paramlist,
+                            flabel: _,
+                            fid: _,
+                        } => {
+                            compare_arglist_paramlist(
+                                &mut mname.clone(),
+                                &mut arglist.clone(),
+                                &mut paramlist.clone(),
+                            )?;
+                            Ok(ret_type.clone())
+                        }
+                        _ => Err("[".to_owned() + mname + "] is declared as a field."),
+                    }
+                } else {
+                    Err("Method not found.".to_owned())
+                }
+            }
+            _ => Err("Methods are only allowed inside classes.".to_owned()),
         }
     }
     pub fn get_field_type(&self, fname: &String) -> Result<ASTExprType, String> {
@@ -317,16 +571,68 @@ impl ASTExprType {
                 Err("Field [".to_owned()
                     + fname.as_str()
                     + "] not declared inside type ["
-                    + fname.as_str()
+                    + s.name.as_str()
                     + "]")
             }
+            ASTExprType::Class(c) => {
+                if let Some(entry) = c.symbol_table.table.get(fname) {
+                    match entry {
+                        CSymbol::Var {
+                            name: _, vartype, ..
+                        } => vartype.as_astexprtype(),
+                        CSymbol::Func {
+                            name: _, ret_type, ..
+                        } => Ok(ret_type.clone()),
+                    }
+                } else {
+                    Err("Field [".to_owned()
+                        + fname.as_str()
+                        + "] not present in ["
+                        + c.name.as_str()
+                        + "] class")
+                }
+            }
             _ => Err("Expression of this type cannot be accessed.".to_owned()),
+        }
+    }
+    pub fn validate_method(
+        &self,
+        fname: &String,
+        arglist: &LinkedList<ASTNode>,
+    ) -> Result<bool, String> {
+        match self {
+            ASTExprType::Class(c) => {
+                if let Some(CSymbol::Func {
+                    name: _,
+                    ret_type: _,
+                    paramlist,
+                    flabel: _,
+                    fid: _,
+                }) = c.symbol_table.table.get(fname)
+                {
+                    let mut fname = fname.clone();
+                    let mut arglist = arglist.clone();
+                    let mut paramlist = paramlist.clone();
+                    compare_arglist_paramlist(&mut fname, &mut arglist, &mut paramlist)?;
+                    Ok(true)
+                } else {
+                    Err("Variable / Method error.".to_owned())
+                }
+            }
+            _ => Err("Method called to non class type.".to_owned()),
+        }
+    }
+    pub fn get_type_name(&self) -> Result<String, String> {
+        match self {
+            ASTExprType::Struct(s) => Ok(s.name.clone()),
+            ASTExprType::Class(c) => Ok(c.name.clone()),
+            _ => unreachable!(),
         }
     }
     pub fn get_field_id(&self, fname: &String) -> Result<usize, String> {
         match self {
             ASTExprType::Struct(s) => {
-                let mut len = 1;
+                let mut len = 0;
                 for i in s.fields.iter() {
                     if &i.name == fname {
                         return Ok(len);
@@ -338,6 +644,28 @@ impl ASTExprType {
                     + "] not declared inside type ["
                     + fname.as_str()
                     + "]")
+            }
+            ASTExprType::Class(c) => {
+                if let Some(entry) = c.symbol_table.table.get(fname) {
+                    let val = match entry {
+                        CSymbol::Var {
+                            name: _,
+                            vartype: _,
+                            varid,
+                            varindices: _,
+                        } => varid,
+                        CSymbol::Func {
+                            name: _,
+                            ret_type: _,
+                            paramlist: _,
+                            flabel: _,
+                            fid,
+                        } => fid,
+                    };
+                    Ok(usize::try_from(*val).unwrap())
+                } else {
+                    Err("Symbol [".to_owned() + fname + "] not declared.")
+                }
             }
             _ => Err("Expression of this type cannot be accessed.".to_owned()),
         }
@@ -353,6 +681,7 @@ impl ASTExprType {
             ASTExprType::Primitive(_) => None,
             ASTExprType::Pointer(p) => Some((**p).clone()),
             ASTExprType::Struct { .. } => None,
+            ASTExprType::Class { .. } => None,
             ASTExprType::Error => None,
         }
     }
@@ -363,6 +692,7 @@ impl ASTExprType {
                 b.set_base_type(p);
             }
             ASTExprType::Struct { .. } => *self = p,
+            ASTExprType::Class { .. } => *self = p,
             ASTExprType::Error => {}
         }
     }
@@ -371,6 +701,7 @@ impl ASTExprType {
             ASTExprType::Primitive(_) => self.clone(),
             ASTExprType::Pointer(p) => Self::get_base_type(p),
             ASTExprType::Struct { .. } => self.clone(),
+            ASTExprType::Class { .. } => self.clone(),
             ASTExprType::Error => ASTExprType::Primitive(PrimitiveType::Void),
         }
     }
@@ -379,6 +710,7 @@ impl ASTExprType {
             ASTExprType::Pointer(p) => Self::depth(p) + 1,
             ASTExprType::Primitive(_) => 0,
             ASTExprType::Struct { .. } => 0,
+            ASTExprType::Class { .. } => 0,
             ASTExprType::Error => 0,
         }
     }
@@ -392,6 +724,7 @@ impl FieldType {
                 b.set_base_type(p);
             }
             FieldType::Struct { .. } => *self = p,
+            FieldType::Class { .. } => *self = p,
         }
     }
     pub fn get_base_type(&self) -> FieldType {
@@ -399,6 +732,7 @@ impl FieldType {
             FieldType::Primitive(_) => self.clone(),
             FieldType::Pointer(p) => Self::get_base_type(p),
             FieldType::Struct(_) => self.clone(),
+            FieldType::Class(_) => self.clone(),
         }
     }
     pub fn depth(&self) -> usize {
@@ -406,6 +740,7 @@ impl FieldType {
             FieldType::Pointer(p) => Self::depth(p) + 1,
             FieldType::Primitive(_) => 0,
             FieldType::Struct(_) => 0,
+            FieldType::Class(_) => 0,
         }
     }
 }
@@ -414,8 +749,17 @@ impl FieldType {
 pub enum ASTError {
     TypeError(String),
 }
+
 impl From<VarNode> for LinkedList<VarNode> {
     fn from(param: VarNode) -> Self {
+        let mut list = LinkedList::new();
+        list.push_back(param);
+        list
+    }
+}
+
+impl From<CSymbol> for LinkedList<CSymbol> {
+    fn from(param: CSymbol) -> Self {
         let mut list = LinkedList::new();
         list.push_back(param);
         list
@@ -435,6 +779,7 @@ pub struct VarNode {
     pub vartype: ASTExprType,
     pub varindices: Vec<usize>,
 }
+
 impl VarNode {
     pub fn validate_locality(&mut self) {
         let lst = LOCALSYMBOLTABLE.lock().unwrap();
@@ -468,7 +813,7 @@ impl VarNode {
         }
         if lst.contains_key(&self.varname) == true {
             exit_on_err(
-                "Parameter Symbol ".to_owned() + &self.varname.as_str() + " is already declared ",
+                "Parameter Symbol [".to_owned() + &self.varname.as_str() + "] is already declared ",
             );
         }
     }
@@ -527,6 +872,9 @@ impl VarNode {
             ASTExprType::Primitive(_) => 1,
             ASTExprType::Pointer(_) => 1,
             ASTExprType::Struct(s) => s.size.clone(),
+            ASTExprType::Class(s) => {
+                usize::try_from(s.methodsize.clone() + s.fieldsize.clone()).unwrap()
+            }
             ASTExprType::Error => 0,
         };
         for i in self.varindices.iter() {
@@ -598,6 +946,10 @@ pub enum ASTNode {
     WhileNode {
         expr: Box<ASTNode>,
         xdo: Box<ASTNode>,
+    },
+    ClassNode {
+        cname: String,
+        methods: Box<LinkedList<ASTNode>>,
     },
     FuncDefNode {
         fname: String,
@@ -746,6 +1098,7 @@ impl std::fmt::Display for ASTExprType {
             ASTExprType::Error => write!(f, "ASTExprType :: Error"),
             ASTExprType::Primitive(p) => write!(f, "{}", p),
             ASTExprType::Struct(s) => write!(f, "struct_{}_t", s.name),
+            ASTExprType::Class(s) => write!(f, "class_{}_t", s.name),
             ASTExprType::Pointer(p) => write!(f, "{}{}", "*".repeat(p.depth()), p.get_base_type()),
         }
     }

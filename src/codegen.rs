@@ -30,7 +30,52 @@ lazy_static! {
     //TODO remove this stack
     pub static ref FSTACK: Mutex<(String,i64)> = Mutex::new((String::default(),0));
 }
+//Gets the label of a function
+pub fn get_function_label(fname: &String, classname: &String) -> usize {
+    if classname.len() > 0 {
+        let tt = TYPE_TABLE.lock().unwrap();
+        if let ASTExprType::Class(p) = tt.tt_get_type(classname).unwrap() {
+            if let Some(entry) = p.symbol_table.table.get(fname) {
+                match entry {
+                    CSymbol::Func {
+                        name: _,
+                        ret_type: _,
+                        paramlist: _,
+                        flabel,
+                        fid: _,
+                    } => *flabel,
+                    _ => LABEL_NOT_FOUND,
+                }
+            } else {
+                LABEL_NOT_FOUND
+            }
+        } else {
+            LABEL_NOT_FOUND
+        }
+    } else {
+        let gst = GLOBALSYMBOLTABLE.lock().unwrap();
+        if let Some(entry) = gst.get(fname) {
+            return match entry {
+                GSymbol::Func {
+                    ret_type: _,
+                    paramlist: _,
+                    flabel,
+                } => flabel.clone(),
+                _ => LABEL_NOT_FOUND,
+            };
+        } else {
+            LABEL_NOT_FOUND
+        }
+    }
+}
 
+/*
+ * Internally, functions are have different key value
+ */
+fn __get_table_id(fname: &String) -> String {
+    let cname = CLASSNAME.lock().unwrap();
+    fname.clone() + "#" + cname.as_str()
+}
 //Wrap error and write to file
 fn write_line(mut writer: &File, args: std::fmt::Arguments) {
     if let Err(e) = writeln!(writer, "{}", args) {
@@ -43,13 +88,11 @@ fn write_line(mut writer: &File, args: std::fmt::Arguments) {
 fn __get_function_storage(fname: &String) -> i64 {
     let ft = FUNCTION_TABLE.lock().unwrap();
     let mut max_size = 0;
-    if let Some(entry) = ft.get(fname) {
+    if let Some(entry) = ft.get(&__get_table_id(fname)) {
         for (
             _k,
             LSymbol::Var {
-                vartype: _,
-                varid,
-                varindices: _,
+                vartype: _, varid, ..
             },
         ) in entry.iter()
         {
@@ -176,9 +219,7 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
     }
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
-        vartype: _,
-        varid,
-        varindices: _,
+        vartype: _, varid, ..
     }) = gst.get(vname)
     {
         let vreg = get_reg();
@@ -197,11 +238,55 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
     0
 }
 /*
+ * Class funccall
+ */
+fn __gen_class_func_call(
+    baseaddrreg: usize,
+    classname: &String,
+    fname: &String,
+    arglist: &Box<LinkedList<ASTNode>>,
+    file: &File,
+    refr: bool,
+) -> usize {
+    //Push Arguments
+    __push_args(file, arglist, refr);
+    //Push return value
+    write_line(file, format_args!("ADD SP, {}", 1));
+    write_line(
+        file,
+        format_args!("CALL L{}", get_function_label(fname, &classname)),
+    );
+    let ret_reg = __get_safe_register();
+    //extract return register
+    write_line(file, format_args!("POP R{}", ret_reg));
+    //remove arguments
+    write_line(file, format_args!("SUB SP, {}", (&**arglist).len() + 1));
+    //Restore live registers except_ret_reg
+    __restore_registers(file, ret_reg);
+    free_reg(baseaddrreg);
+    return ret_reg;
+}
+/*
  * Meta function which recursively generates assembly lines
  * in xsm for arithmetic operations
  */
 fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
     match root {
+        ASTNode::ClassNode { cname, methods } => {
+            //gen code for every method inside class
+            let mut cn = CLASSNAME.lock().unwrap();
+            *cn = cname.clone();
+            std::mem::drop(cn);
+
+            for i in methods.iter() {
+                __code_gen(i, file, false);
+            }
+
+            let mut cn = CLASSNAME.lock().unwrap();
+            *cn = "".to_owned();
+            std::mem::drop(cn);
+            CONN_RETURN
+        }
         ASTNode::ErrorNode { err } => {
             let err: String = match err {
                 ASTError::TypeError(s) => s.to_owned(),
@@ -274,14 +359,13 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 if dotptr == &ASTNode::Void && arrowptr == &ASTNode::Void {
                     break;
                 }
-                if dotptr != &ASTNode::Void {
-                    if let ASTNode::VAR {
+                match dotptr {
+                    ASTNode::VAR {
                         name: nname,
                         array_access: _,
                         dot_field_access,
                         arrow_field_access,
-                    } = dotptr
-                    {
+                    } => {
                         let field_offset = currtype.get_field_id(nname).unwrap();
                         currtype = currtype.get_field_type(nname).unwrap();
                         write_line(file, format_args!("ADD R{}, {}", baseaddrreg, field_offset));
@@ -289,16 +373,34 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         arrowptr = &**arrow_field_access;
                         continue;
                     }
+                    ASTNode::FuncCallNode { fname, arglist } => {
+                        //push contents of baseaddr reg first
+                        //Save Live registers except ret_reg
+                        let classname = currtype.get_type_name().unwrap();
+                        __backup_registers(file);
+                        //Push Self addr
+                        write_line(file, format_args!("PUSH R{}", baseaddrreg));
+                        return __gen_class_func_call(
+                            baseaddrreg,
+                            &classname,
+                            fname,
+                            arglist,
+                            file,
+                            refr,
+                        );
+                    }
+                    ASTNode::Void => {}
+                    _ => {
+                        unreachable!();
+                    }
                 }
-                // check if dot field type is
-                if arrowptr != &ASTNode::Void {
-                    if let ASTNode::VAR {
+                match arrowptr {
+                    ASTNode::VAR {
                         name: nname,
                         array_access: _,
                         dot_field_access,
                         arrow_field_access,
-                    } = arrowptr
-                    {
+                    } => {
                         if let ASTExprType::Pointer(etype) = &currtype {
                             write_line(
                                 file,
@@ -314,6 +416,32 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                             arrowptr = &**arrow_field_access;
                             continue;
                         }
+                    }
+                    ASTNode::FuncCallNode { fname, arglist } => {
+                        //push contents of baseaddr reg first
+                        //Save Live registers except ret_reg
+                        if let ASTExprType::Pointer(etype) = &currtype {
+                            write_line(
+                                file,
+                                format_args!("MOV R{}, [R{}]", baseaddrreg, baseaddrreg),
+                            );
+                            let classname = etype.get_type_name().unwrap();
+                            __backup_registers(file);
+                            //Push Self addr
+                            write_line(file, format_args!("PUSH R{}", baseaddrreg));
+                            //Push Arguments
+                            return __gen_class_func_call(
+                                baseaddrreg,
+                                &classname,
+                                fname,
+                                arglist,
+                                file,
+                                refr,
+                            );
+                        }
+                    }
+                    _ => {
+                        unreachable!();
                     }
                 }
             }
@@ -524,12 +652,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     let left_register: usize = __code_gen(lhs, file, true).try_into().unwrap();
                     let right_register: usize = __code_gen(rhs, file, false).try_into().unwrap();
                     match &**lhs {
-                        ASTNode::VAR {
-                            name,
-                            array_access: _,
-                            dot_field_access: _,
-                            arrow_field_access: _,
-                        } => {
+                        ASTNode::VAR { name, .. } => {
                             __copy_struct(file, name, left_register, right_register);
                         }
                         ASTNode::UnaryNode {
@@ -538,13 +661,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                             ptr,
                             depth: _,
                         } => {
-                            if let ASTNode::VAR {
-                                name,
-                                array_access: _,
-                                dot_field_access: _,
-                                arrow_field_access: _,
-                            } = &**ptr
-                            {
+                            if let ASTNode::VAR { name, .. } = &**ptr {
                                 __copy_struct(file, name, left_register, right_register);
                             }
                         }
@@ -633,12 +750,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 ret_reg
             }
             ASTNodeType::Ref => match &**ptr {
-                ASTNode::VAR {
-                    name: _,
-                    array_access: _,
-                    dot_field_access: _,
-                    arrow_field_access: _,
-                } => {
+                ASTNode::VAR { .. } => {
                     let regaddr: usize = __code_gen(ptr, file, true).try_into().unwrap();
                     return regaddr;
                 }
@@ -647,12 +759,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                 }
             },
             ASTNodeType::Deref => match &**ptr {
-                ASTNode::VAR {
-                    name: _,
-                    array_access: _,
-                    dot_field_access: _,
-                    arrow_field_access: _,
-                } => {
+                ASTNode::VAR { .. } => {
                     let regaddr: usize = __code_gen(ptr, file, refr).try_into().unwrap();
                     for _i in 0..depth.unwrap() {
                         write_line(file, format_args!("MOV R{},[R{}]", regaddr, regaddr));
@@ -770,16 +877,19 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             //this node is traverse after all function def nodes,
             write_line(
                 file,
-                format_args!("L{}:", get_function_label(&"main".to_owned())),
+                format_args!(
+                    "L{}:",
+                    get_function_label(&"main".to_owned(), &String::default())
+                ),
             );
             let ft = FUNCTION_TABLE.lock().unwrap();
-            if let Some(local_table) = ft.get("main") {
+            if let Some(local_table) = ft.get("main#") {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = local_table.clone();
                 std::mem::drop(ft);
                 std::mem::drop(lst);
 
-                write_line(file, format_args!("PUSH BP\nMOV BP,SP",));
+                write_line(file, format_args!("PUSH BP\nMOV BP, SP",));
                 write_line(
                     file,
                     format_args!("ADD SP, {}", __get_function_storage(&"main".to_owned())),
@@ -818,14 +928,17 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
         } => {
             write_line(
                 file,
-                format_args!("L{}:\nBRKP\nPUSH BP\nMOV BP,SP", get_function_label(fname)),
+                format_args!(
+                    "L{}:\nPUSH BP\nMOV BP, SP",
+                    get_function_label(fname, &*CLASSNAME.lock().unwrap())
+                ),
             );
             write_line(
                 file,
                 format_args!("ADD SP, {}", __get_function_storage(fname)),
             );
             let ft = FUNCTION_TABLE.lock().unwrap();
-            if let Some(_local_table) = ft.get(fname) {
+            if let Some(_local_table) = ft.get(&__get_table_id(fname)) {
                 let mut lst = LOCALSYMBOLTABLE.lock().unwrap();
                 *lst = _local_table.clone();
                 let mut fs = FSTACK.lock().unwrap();
@@ -1004,7 +1117,7 @@ fn __header_gen(mut file: &File) {
     }
     writeln!(
         file,
-        "0\n2056\n0\n0\n0\n0\n0\n0\nBRKP\nMOV SP, 4095\nADD SP, {baseaddr}\nMOV BP,SP\nADD SP,1\nCALL L{l}\nSUB SP,1\nPUSH R0\nINT 10",
+        "0\n2056\n0\n0\n0\n0\n0\n0\nBRKP\nMOV SP, 4095\nADD SP, {baseaddr}\nMOV BP, SP\nADD SP, 1\nCALL L{l}\nSUB SP, 1\nPUSH R0\nINT 10",
     )
     .unwrap();
 }
@@ -1022,7 +1135,7 @@ fn __xsm_alloc_syscall(file: &File) -> usize {
     write_line(file, format_args!("ADD SP, 3"));
     write_line(file, format_args!("CALL 0"));
     write_line(file, format_args!("POP R{}", register));
-    write_line(file, format_args!("SUB SP,4"));
+    write_line(file, format_args!("SUB SP, 4"));
     __restore_registers(file, register);
     register
 }
@@ -1039,7 +1152,7 @@ fn __xsm_free_syscall(file: &File, _varreg: usize) -> usize {
     write_line(file, format_args!("ADD SP, 3"));
     write_line(file, format_args!("CALL 0"));
     write_line(file, format_args!("POP R{}", register));
-    write_line(file, format_args!("SUB SP,4"));
+    write_line(file, format_args!("SUB SP, 4"));
     __restore_registers(file, register);
     register
 }
@@ -1054,7 +1167,7 @@ fn __xsm_heapset_syscall(file: &File) -> usize {
     write_line(file, format_args!("ADD SP, 4"));
     write_line(file, format_args!("CALL 0"));
     write_line(file, format_args!("POP R{}", register));
-    write_line(file, format_args!("SUB SP,4"));
+    write_line(file, format_args!("SUB SP, 4"));
     __restore_registers(file, register);
     register
 }
