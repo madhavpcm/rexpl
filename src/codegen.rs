@@ -238,6 +238,35 @@ fn __load_variable(mut file: &File, vname: &String) -> usize {
     0
 }
 /*
+ * Class funccall
+ */
+fn __gen_class_func_call(
+    baseaddrreg: usize,
+    classname: &String,
+    fname: &String,
+    arglist: &Box<LinkedList<ASTNode>>,
+    file: &File,
+    refr: bool,
+) -> usize {
+    //Push Arguments
+    __push_args(file, arglist, refr);
+    //Push return value
+    write_line(file, format_args!("ADD SP, {}", 1));
+    write_line(
+        file,
+        format_args!("CALL L{}", get_function_label(fname, &classname)),
+    );
+    let ret_reg = __get_safe_register();
+    //extract return register
+    write_line(file, format_args!("POP R{}", ret_reg));
+    //remove arguments
+    write_line(file, format_args!("SUB SP, {}", (&**arglist).len() + 1));
+    //Restore live registers except_ret_reg
+    __restore_registers(file, ret_reg);
+    free_reg(baseaddrreg);
+    return ret_reg;
+}
+/*
  * Meta function which recursively generates assembly lines
  * in xsm for arithmetic operations
  */
@@ -292,7 +321,7 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
             let varid = getvarid(name).expect("Error in variable tables");
             let varindices = getvarindices(name).expect("Error in variable tables");
 
-            let mut baseaddrreg = __load_variable(file, name);
+            let baseaddrreg = __load_variable(file, name);
 
             let mut registers = REGISTERS.lock().unwrap();
             registers[baseaddrreg].1 =
@@ -351,25 +380,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                         __backup_registers(file);
                         //Push Self addr
                         write_line(file, format_args!("PUSH R{}", baseaddrreg));
-                        //Push Arguments
-                        __push_args(file, arglist, refr);
-                        //Push return value
-                        write_line(file, format_args!("ADD SP, {}", 1));
-                        write_line(
+                        return __gen_class_func_call(
+                            baseaddrreg,
+                            &classname,
+                            fname,
+                            arglist,
                             file,
-                            format_args!("CALL L{}", get_function_label(fname, &classname)),
+                            refr,
                         );
-                        let ret_reg = __get_safe_register();
-                        //extract return register
-                        write_line(file, format_args!("POP R{}", ret_reg));
-                        //remove arguments
-                        write_line(file, format_args!("SUB SP, {}", (&**arglist).len() + 1));
-                        //Restore live registers except_ret_reg
-                        __restore_registers(file, ret_reg);
-                        write_line(file, format_args!("MOV R{}, R{}", baseaddrreg, ret_reg));
-                        baseaddrreg = ret_reg;
-                        free_reg(ret_reg);
-                        return baseaddrreg;
                     }
                     ASTNode::Void => {}
                     _ => {
@@ -412,22 +430,14 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                             //Push Self addr
                             write_line(file, format_args!("PUSH R{}", baseaddrreg));
                             //Push Arguments
-                            __push_args(file, arglist, refr);
-                            //Push return value
-                            write_line(file, format_args!("ADD SP, {}", 1));
-                            write_line(
+                            return __gen_class_func_call(
+                                baseaddrreg,
+                                &classname,
+                                fname,
+                                arglist,
                                 file,
-                                format_args!("CALL L{}", get_function_label(fname, &classname)),
+                                refr,
                             );
-                            let ret_reg = __get_safe_register();
-                            //extract return register
-                            write_line(file, format_args!("POP R{}", ret_reg));
-                            //remove arguments
-                            write_line(file, format_args!("SUB SP, {}", (&**arglist).len() + 1));
-                            //Restore live registers except_ret_reg
-                            __restore_registers(file, ret_reg);
-                            free_reg(baseaddrreg);
-                            return ret_reg;
                         }
                     }
                     _ => {
