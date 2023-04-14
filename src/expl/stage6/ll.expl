@@ -1,0 +1,87 @@
+
+type
+  List
+  {
+    int data;
+    List* next;
+  };
+endtype
+
+decl
+    List* head;
+	List* revlist(List* node);
+	int printlist(List* node);
+enddecl
+List* revlist(List* node)
+{
+	decl
+		List* temp;
+	enddecl
+	begin
+		if(node == null) then
+			return null;
+		endif;
+		if(node->next ==null) then
+			head = node;
+			return node;
+		endif;
+		temp = revlist(node->next);
+		temp->next = node;
+		node->next = null;
+		return node;
+	end
+}
+int printlist(List* node)
+{
+	decl
+		List temp;
+		int t;
+	enddecl
+	begin
+		if(node == null) then
+			return 0;
+		endif;
+		write(node->data);
+		t=printlist(node->next);
+		temp=*node;
+		write(temp.data);
+		return 0;
+	end
+}
+int main()
+{
+  decl
+    int length, x;
+    List *p, *q;
+  enddecl
+
+  begin
+    initialize();
+
+    head=null;
+    read(length);
+
+    q=head;
+    while (length!=0)  do
+      read(x);
+      p=alloc();
+      p->data=x;
+      p->next=null;
+
+      if (head==null) then
+      head=p;
+      q=p;
+      else
+      q->next=p;
+      q=q->next;
+      endif;
+
+      length=length-1;
+    endwhile;
+
+	q=revlist(head);
+	x=printlist(head);
+    return 1;
+  end
+}
+

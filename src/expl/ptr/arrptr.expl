@@ -1,0 +1,15 @@
+decl
+	int foo(int b, int c, int d);
+enddecl
+
+int main(){
+	decl
+		int e[10],i;
+		int *c;
+		int **b;
+	enddecl
+	begin
+		c = e;
+		return 0;
+	end
+}
