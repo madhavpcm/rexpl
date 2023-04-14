@@ -216,6 +216,8 @@ impl TypeTable {
                     flabel,
                     fid,
                 } => {
+                    *flabel = *label_count;
+                    *label_count += 1;
                     if let Some(entry) = cstruct.symbol_table.table.get(name) {
                         match entry {
                             CSymbol::Var { .. } => {
@@ -225,15 +227,21 @@ impl TypeTable {
                                     + &name
                                     + "] is already declared as field");
                             }
-                            CSymbol::Func { name, .. } => {
+                            CSymbol::Func {
+                                name,
+                                ret_type,
+                                paramlist,
+                                flabel,
+                                fid: f2,
+                            } => {
+                                *fid = *f2;
                                 log::warn!("In class {} overriding method {}", tname, name)
                             }
                         }
+                    } else {
+                        *fid = fieldid;
+                        fieldid += 1;
                     }
-                    *flabel = *label_count;
-                    *label_count += 1;
-                    *fid = fieldid;
-                    fieldid += 1;
                     cstruct.symbol_table.table.insert(
                         name.clone(),
                         CSymbol::Func {
@@ -255,7 +263,7 @@ impl TypeTable {
             ASTExprType::Class(ASTClassType {
                 name: (tname.clone()),
                 fieldsize: (cstruct.fieldsize),
-                methodsize: (fieldid - cstruct.fieldsize),
+                methodsize: (fieldid),
                 symbol_table: (cstruct.symbol_table),
                 parent: cstruct.parent,
                 vft_id: cstruct.vft_id,
@@ -934,15 +942,7 @@ impl VarNode {
                 varindices: (self.varindices.clone()),
             },
         );
-        let mut size = match &self.vartype {
-            ASTExprType::Primitive(_) => 1,
-            ASTExprType::Pointer(_) => 1,
-            ASTExprType::Struct(s) => s.size.clone(),
-            ASTExprType::Class(s) => {
-                usize::try_from(s.methodsize.clone() + s.fieldsize.clone()).unwrap()
-            }
-            ASTExprType::Error => 0,
-        };
+        let mut size = self.vartype.size().unwrap();
         for i in self.varindices.iter() {
             size *= i;
         }

@@ -675,31 +675,57 @@ fn __code_gen(root: &ASTNode, mut file: &File, refr: bool) -> usize {
                     if let ASTExprType::Pointer(c) = lc.getexprtype().unwrap() {
                         match &*c {
                             ASTExprType::Class(_) => {
-                                let newclassvftid = match &**rhs {
+                                write_line(file, format_args!("ADD R{}, 1", left_register));
+                                match &**rhs {
                                     ASTNode::StdFuncCallNode { func: _, arglist } => {
                                         match arglist.front().unwrap() {
-                                            ASTNode::VAR { name, .. } => TYPE_TABLE
-                                                .lock()
-                                                .unwrap()
-                                                .tt_get_type(name)
-                                                .unwrap()
-                                                .get_vftid()
-                                                .unwrap(),
+                                            ASTNode::VAR { name, .. } => {
+                                                let newclassvftid = TYPE_TABLE
+                                                    .lock()
+                                                    .unwrap()
+                                                    .tt_get_type(name)
+                                                    .unwrap()
+                                                    .get_vftid()
+                                                    .unwrap();
+                                                write_line(
+                                                    file,
+                                                    format_args!(
+                                                        "MOV [R{}], {}",
+                                                        left_register,
+                                                        usize::try_from(XSM_STACK_OFFSET).unwrap()
+                                                            + newclassvftid * 8
+                                                    ),
+                                                );
+                                            }
                                             _ => unreachable!(),
                                         }
                                     }
-                                    _ => unreachable!(),
+                                    ASTNode::VAR { .. } => {
+                                        let right_register: usize =
+                                            __code_gen(rhs, file, true).try_into().unwrap();
+                                        write_line(
+                                            file,
+                                            format_args!("ADD R{}, 1", right_register),
+                                        );
+                                        write_line(
+                                            file,
+                                            format_args!(
+                                                "MOV R{}, [R{}]",
+                                                right_register, right_register
+                                            ),
+                                        );
+                                        write_line(
+                                            file,
+                                            format_args!(
+                                                "MOV [R{}], R{}",
+                                                left_register, right_register
+                                            ),
+                                        );
+                                    }
+                                    _ => {
+                                        unreachable!()
+                                    }
                                 };
-                                write_line(file, format_args!("ADD R{}, 1", left_register));
-                                write_line(
-                                    file,
-                                    format_args!(
-                                        "MOV [R{}], {}",
-                                        left_register,
-                                        usize::try_from(XSM_STACK_OFFSET).unwrap()
-                                            + newclassvftid * 8
-                                    ),
-                                );
                             }
                             _ => {}
                         }
