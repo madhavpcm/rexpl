@@ -118,6 +118,33 @@ impl ASTNode {
                     }
                     Ok(())
                 }
+                STDLibFunction::New => {
+                    if arglist.len() != 1 {
+                        return Err("[New] expects 1 argument.".to_owned());
+                    }
+                    match arglist.front().unwrap() {
+                        ASTNode::VAR {
+                            name,
+                            array_access,
+                            dot_field_access,
+                            arrow_field_access,
+                        } => {
+                            if !(**dot_field_access == ASTNode::Void
+                                && **arrow_field_access == ASTNode::Void
+                                && array_access.len() == 0)
+                            {
+                                return Err("[New] Expected a class_name".to_owned());
+                            }
+                            if let Ok(ASTExprType::Class(_)) =
+                                TYPE_TABLE.lock().unwrap().tt_get_type(&name)
+                            {
+                                return Ok(());
+                            }
+                            return Err("[New] got a class_name which is not declared".to_owned());
+                        }
+                        _ => return Err("[New] Expected a declared class_name".to_owned()),
+                    }
+                }
                 _ => Err("Std function Unimplemented!".to_owned()),
             },
             ASTNode::VAR {
@@ -287,11 +314,7 @@ impl ASTNode {
                 }
                 Ok(())
             }
-            ASTNode::IfElseNode {
-                expr,
-                xif: _,
-                xelse: _,
-            } => {
+            ASTNode::IfElseNode { expr, .. } => {
                 if expr.getexprtype() != Some(ASTExprType::Primitive(PrimitiveType::Bool)) {
                     return Err("Invalid expression inside if else's condition.".to_owned());
                 }
@@ -300,6 +323,9 @@ impl ASTNode {
             ASTNode::ReturnNode { expr } => {
                 let ct = RET_TYPE.lock().unwrap().clone();
                 let b = expr.getexprtype();
+                if let ASTExprType::Class(_) = b.as_ref().unwrap().get_base_type() {
+                    return Err("Stage 8 doesnt allow classes to be returned".to_owned());
+                }
                 if b == Some(ASTExprType::Primitive(PrimitiveType::Null)) {
                     if let ASTExprType::Pointer(_) = ct {
                         return Ok(());
@@ -331,12 +357,7 @@ impl ASTNode {
                     Ok(())
                 }
                 ASTNodeType::Alloc => match &**ptr {
-                    ASTNode::VAR {
-                        name: _,
-                        array_access: _,
-                        dot_field_access: _,
-                        arrow_field_access: _,
-                    } => {
+                    ASTNode::VAR { .. } => {
                         if let Some(ASTExprType::Pointer(_)) = ptr.getexprtype() {
                             Ok(())
                         } else {
@@ -356,10 +377,7 @@ impl ASTNode {
                 }
                 ASTNodeType::Ref => match &**ptr {
                     ASTNode::VAR {
-                        name,
-                        array_access,
-                        dot_field_access: _,
-                        arrow_field_access: _,
+                        name, array_access, ..
                     } => {
                         let varindices = getvarindices(name).unwrap();
                         if array_access.len() != varindices.len() {
@@ -372,19 +390,11 @@ impl ASTNode {
                 ASTNodeType::Write => {
                     ptr.validate()?;
                     match &**ptr {
-                        ASTNode::VAR {
-                            name: _,
-                            array_access: _,
-                            dot_field_access: _,
-                            arrow_field_access: _,
-                        } => Ok(()),
+                        ASTNode::VAR { .. } => Ok(()),
                         ASTNode::INT(_) => Ok(()),
                         ASTNode::STR(_) => Ok(()),
                         ASTNode::BinaryNode {
-                            op: _,
-                            exprtype,
-                            lhs: _,
-                            rhs: _,
+                            op: _, exprtype, ..
                         } => match exprtype {
                             Some(ASTExprType::Primitive(PrimitiveType::Bool)) => {
                                 Err("Write statement expects a str or int type.".to_owned())
@@ -424,6 +434,18 @@ impl ASTNode {
                                 Some(ASTExprType::Pointer(..)),
                                 Some(ASTExprType::Primitive(PrimitiveType::Null)),
                             ) => Ok(()),
+                            (Some(ASTExprType::Pointer(c1)), Some(ASTExprType::Pointer(c2))) => {
+                                match (&*c1, &*c2) {
+                                    (ASTExprType::Class(a), ASTExprType::Class(_)) => {
+                                        if c2.is_ancestor(Some(a.name.clone())) {
+                                            Ok(())
+                                        } else {
+                                            Err("Assignment of invalid type.".to_owned())
+                                        }
+                                    }
+                                    _ => Err("Assignment of invalid type.".to_owned()),
+                                }
+                            }
                             _ => Err("Assignment of invalid type.".to_owned()),
                         }
                     }
@@ -462,7 +484,7 @@ impl ASTNode {
                         GSymbol::Func {
                             ret_type: _,
                             paramlist,
-                            flabel: _,
+                            ..
                         } => {
                             p = paramlist.clone();
                         }
@@ -569,7 +591,7 @@ impl ASTNode {
     }
     pub fn getexprtype(&mut self) -> Option<ASTExprType> {
         match self {
-            ASTNode::StdFuncCallNode { func, arglist: _ } => match func {
+            ASTNode::StdFuncCallNode { func, arglist } => match func {
                 STDLibFunction::Heapset => Some(ASTExprType::Primitive(PrimitiveType::Int)),
                 STDLibFunction::Free => Some(ASTExprType::Primitive(PrimitiveType::Int)),
                 STDLibFunction::Alloc => Some(ASTExprType::Primitive(PrimitiveType::Int)),
@@ -578,6 +600,17 @@ impl ASTNode {
                 STDLibFunction::Syscall => Some(ASTExprType::Primitive(PrimitiveType::Void)),
                 STDLibFunction::Read => Some(ASTExprType::Primitive(PrimitiveType::Void)),
                 STDLibFunction::Write => Some(ASTExprType::Primitive(PrimitiveType::Void)),
+                STDLibFunction::New => match (&**arglist).front().unwrap() {
+                    ASTNode::VAR { name, .. } => {
+                        if let Ok(p) = TYPE_TABLE.lock().unwrap().tt_get_type(&name) {
+                            return Some(ASTExprType::Pointer(Box::new(p)));
+                        }
+                        return None;
+                    }
+                    _ => {
+                        unreachable!()
+                    }
+                },
             },
             ASTNode::ErrorNode { err } => match err {
                 ASTError::TypeError(s) => {
@@ -854,18 +887,14 @@ pub fn getvarindices(name: &String) -> Option<Vec<usize>> {
 pub fn getvarid(name: &String) -> Option<i64> {
     let lst = LOCALSYMBOLTABLE.lock().unwrap();
     if let Some(LSymbol::Var {
-        vartype: _,
-        varid,
-        varindices: _,
+        vartype: _, varid, ..
     }) = lst.get(name)
     {
         return Some(*varid);
     }
     let gst = GLOBALSYMBOLTABLE.lock().unwrap();
     if let Some(GSymbol::Var {
-        vartype: _,
-        varid,
-        varindices: _,
+        vartype: _, varid, ..
     }) = gst.get(name)
     {
         return Some(i64::try_from(*varid).unwrap());
@@ -880,16 +909,10 @@ pub fn varinscope(name: &String) -> Result<(), String> {
         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
         if let Some(entry) = gst.get(name) {
             match entry {
-                GSymbol::Var {
-                    vartype: _,
-                    varid: _,
-                    varindices: _,
-                } => Ok(()),
-                GSymbol::Func {
-                    ret_type: _,
-                    paramlist: _,
-                    flabel: _,
-                } => Err("Symbol [".to_owned() + name.as_str() + "] declared as a function."),
+                GSymbol::Var { .. } => Ok(()),
+                GSymbol::Func { .. } => {
+                    Err("Symbol [".to_owned() + name.as_str() + "] declared as a function.")
+                }
             }
         } else {
             Err("Symbol [".to_owned() + name.as_str() + "] is not declared.")

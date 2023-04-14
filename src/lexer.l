@@ -35,6 +35,8 @@ class 'CLASS'
 endclass 'ENDCLASS'
 this 'THIS'
 div 'DIV'
+extends 'EXTENDS'
+new 'NEW'
 
 [.] "DOT"
 -> "ARROW"

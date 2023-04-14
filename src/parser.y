@@ -506,6 +506,29 @@ AssgStmt -> Result<ASTNode,String>:
 		node.validate()?;
 		Ok(node)
 	}
+	| VariableExpr '=' 'NEW' '(' 'VAR' ')' ';'
+	{
+		let v = $5.map_err(|_| "VAR Err".to_string())?;  
+
+		let mut node_ = ASTNode::StdFuncCallNode{
+			func: STDLibFunction::New,
+			arglist: Box::new(LinkedList::from(ASTNode::VAR{
+				name: $lexer.span_str(v.span()).to_string(), 
+				array_access: Vec::default(),
+				dot_field_access: Box::new(ASTNode::Void),
+				arrow_field_access: Box::new(ASTNode::Void),
+			})),
+		};
+		node_.validate()?;
+		let mut node = ASTNode::BinaryNode{
+			op : ASTNodeType::Equals,
+            exprtype : Some(ASTExprType::Primitive(PrimitiveType::Void)),
+			lhs : Box::new($1?),
+			rhs : Box::new(node_),
+		};
+		node.validate()?;
+		Ok(node)
+	}
 	;
 InputStmt -> Result<ASTNode, String> :
 	"READ" '(' Variable ')' ';'
@@ -953,6 +976,16 @@ ClassName -> Result<String,String>:
 	'VAR' 
 	{
 		let mut cn = CLASSNAME.lock().unwrap();
+		let v = $1.map_err(|_| "VARErr".to_owned())?;
+		*cn = $lexer.span_str(v.span()).to_owned();
+		Ok(cn.clone())
+	}
+	| 'VAR' 'EXTENDS' 'VAR'
+	{
+		let mut cn = CLASSNAME.lock().unwrap();
+		let v = $3.map_err(|_| "VARErr".to_owned())?;
+		let mut parent = PCLASSNAME.lock().unwrap();
+		*parent = $lexer.span_str(v.span()).to_owned();
 		let v = $1.map_err(|_| "VARErr".to_owned())?;
 		*cn = $lexer.span_str(v.span()).to_owned();
 		Ok(cn.clone())

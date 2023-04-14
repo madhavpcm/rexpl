@@ -1,58 +1,64 @@
 class
-	fact{
+	A {
 		decl
-			int x;
+			int i;
 			div
-			int findfactorial(int n);
+			int f0();
+			int f1();
 		enddecl
-		int findfactorial(int n){
+		int f0() {
 			decl
-				int p;
+				int c;
 			enddecl
 			begin
-				if(n<=1)then
-					p=1;
-				else
-					p=n*self->findfactorial(n-1);
-				endif;
-				return p;
+				c = self->f1();
+				write(self->i);
+			return 1;
+			end
+		}
+		int f1() {
+			decl
+			enddecl
+			begin
+				self->i=0;
+				write("In A F1");
+				return 1;
 			end
 		}
 	};
-	testfactsum{
+	B extends A{
 		decl
-			fact* o1;
-			div 
-			int testfun(int n);
+			div
+			int f1();
 		enddecl
-		int testfun(int n){
+		int f1() {
 			decl
-				int sum;
 			enddecl
 			begin
-				self->o1=alloc();
-				sum=0;
-				while(n!=0)do
-					sum=sum+self->o1->findfactorial(n);
-					n=n-1;
-				endwhile;
-				return sum;
+				self->i=1;
+				write("In B F1");
+				return 1;
 			end
 		}
 	};
 endclass
 decl
-	testfactsum* obj;
+	int n;
+	A* obj;
 enddecl
-int main(){
+int main() {
 	decl
-		int x,n;
 	enddecl
 	begin
 		initialize();
-		obj=alloc();
 		read(n);
-		write(obj->testfun(n));
+		if(n>0) then
+			obj = new(A);
+		else
+			obj = new(B);
+		endif;
+		breakpoint;
+		n = obj->f0();
 		return 1;
 	end
 }

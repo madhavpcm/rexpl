@@ -26,6 +26,8 @@ lazy_static! {
         Mutex::new(ASTExprType::Primitive(PrimitiveType::Null));
     pub static ref INITFLAG: Mutex<bool> = Mutex::new(false);
     pub static ref CLASSNAME: Mutex<String> = Mutex::new(String::new());
+    pub static ref PCLASSNAME: Mutex<String> = Mutex::new(String::new());
+    pub static ref VFT_ID: Mutex<usize> = Mutex::new(0);
 }
 pub struct TypeTable {
     pub table: HashMap<String, ASTExprType>,
@@ -125,6 +127,16 @@ impl Default for TypeTable {
         TypeTable { table: (table) }
     }
 }
+impl Iterator for TypeTable {
+    type Item = (String, ASTExprType);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.table
+            .iter()
+            .next()
+            .map(|(k, v)| (k.clone(), v.clone()))
+    }
+}
 impl TypeTable {
     pub fn tt_get_type(&self, tname: &String) -> Result<ASTExprType, String> {
         let table = &self.table;
@@ -194,7 +206,7 @@ impl TypeTable {
         } else {
             return Err("not a class?.".to_owned());
         }
-        let mut fieldid: i64 = cstruct.fieldsize;
+        let mut fieldid: i64 = cstruct.methodsize;
         for i in tmethods.iter_mut() {
             match i {
                 CSymbol::Func {
@@ -204,12 +216,19 @@ impl TypeTable {
                     flabel,
                     fid,
                 } => {
-                    if cstruct.symbol_table.table.contains_key(name) {
-                        return Err("In class [".to_owned()
-                            + tname
-                            + "], Method ["
-                            + &name
-                            + "] is already declared as field/method.");
+                    if let Some(entry) = cstruct.symbol_table.table.get(name) {
+                        match entry {
+                            CSymbol::Var { .. } => {
+                                return Err("In class [".to_owned()
+                                    + tname
+                                    + "], Method ["
+                                    + &name
+                                    + "] is already declared as field");
+                            }
+                            CSymbol::Func { name, .. } => {
+                                log::warn!("In class {} overriding method {}", tname, name)
+                            }
+                        }
                     }
                     *flabel = *label_count;
                     *label_count += 1;
@@ -238,6 +257,8 @@ impl TypeTable {
                 fieldsize: (cstruct.fieldsize),
                 methodsize: (fieldid - cstruct.fieldsize),
                 symbol_table: (cstruct.symbol_table),
+                parent: cstruct.parent,
+                vft_id: cstruct.vft_id,
             }),
         );
         Ok(())
@@ -248,16 +269,34 @@ impl TypeTable {
         tfields: &mut LinkedList<CSymbol>,
     ) -> Result<(), String> {
         let tname = &*CLASSNAME.lock().unwrap();
+        let pname = &*PCLASSNAME.lock().unwrap();
+        let mut vid = VFT_ID.lock().unwrap();
+        let v_ = *vid;
+        *vid += 1;
+        std::mem::drop(vid);
         let map = &mut self.table;
         if map.contains_key(tname) {
             return Err("Type [".to_owned() + tname + "] is already declared.");
         }
-        std::mem::drop(map);
         if tfields.len() > 8 {
             return Err("Type [".to_owned() + tname + "] has more than 8 .");
         }
         let mut fieldid: i64 = 0;
-        let mut ctable: ClassSymbolTable = ClassSymbolTable::default();
+        let mut methods: i64 = 0;
+        //get this from parent
+        let mut ctable: ClassSymbolTable;
+        if pname == "" {
+            ctable = ClassSymbolTable::default();
+        } else {
+            ctable = match map.get(pname).unwrap() {
+                ASTExprType::Class(c) => {
+                    methods = c.methodsize;
+                    c.symbol_table.clone()
+                }
+                _ => return Err("Type [".to_owned() + tname + "] has more than 8 ."),
+            }
+        }
+        std::mem::drop(map);
         for i in tfields.iter_mut() {
             match i {
                 CSymbol::Var {
@@ -288,8 +327,13 @@ impl TypeTable {
             ASTExprType::Class(ASTClassType {
                 name: (tname.clone()),
                 fieldsize: (fieldid),
-                methodsize: (0),
+                methodsize: (methods),
                 symbol_table: (ctable),
+                parent: match pname.as_str() {
+                    "" => None,
+                    _ => Some(pname.clone()),
+                },
+                vft_id: v_,
             }),
         );
         Ok(())
@@ -353,7 +397,7 @@ impl TypeTable {
         map.insert(
             tname.clone(),
             ASTExprType::Struct(ASTStructType {
-                name: tname.clone(),
+                name: tname,
                 size: tfields.len(),
                 fields: tfields,
             }),
@@ -447,6 +491,7 @@ pub enum STDLibFunction {
     Syscall,
     Setaddr,
     Getaddr,
+    New,
 }
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum PrimitiveType {
@@ -483,6 +528,8 @@ pub struct ASTClassType {
     pub fieldsize: i64,
     pub methodsize: i64,
     pub symbol_table: ClassSymbolTable,
+    pub parent: Option<String>,
+    pub vft_id: usize,
 }
 
 impl PartialEq for ASTClassType {
@@ -511,6 +558,32 @@ impl FieldType {
     }
 }
 impl ASTExprType {
+    pub fn get_vftid(&self) -> Option<usize> {
+        match self {
+            ASTExprType::Class(c) => Some(c.vft_id),
+            _ => None,
+        }
+    }
+    pub fn is_ancestor(&self, parent: Option<String>) -> bool {
+        if parent == None {
+            return false;
+        }
+        match self {
+            ASTExprType::Class(c) => {
+                if Some(c.name.clone()) == parent {
+                    true
+                } else {
+                    let ptype = TYPE_TABLE
+                        .lock()
+                        .unwrap()
+                        .tt_get_type(&c.parent.as_ref().unwrap())
+                        .unwrap();
+                    ptype.is_ancestor(parent)
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
     pub fn is_class(&self) -> bool {
         match self {
             ASTExprType::Class(_) => true,
@@ -520,7 +593,10 @@ impl ASTExprType {
     pub fn size(&self) -> Result<usize, String> {
         match self {
             ASTExprType::Primitive(_) => Ok(1),
-            ASTExprType::Pointer(_) => Ok(1),
+            ASTExprType::Pointer(p) => match &**p {
+                ASTExprType::Class(_) => Ok(2),
+                _ => Ok(1),
+            },
             ASTExprType::Struct(s) => Ok(s.size),
             ASTExprType::Class(s) => Ok(usize::try_from(s.methodsize + s.fieldsize).unwrap()),
             ASTExprType::Error => {
@@ -541,8 +617,7 @@ impl ASTExprType {
                             name: _,
                             ret_type,
                             paramlist,
-                            flabel: _,
-                            fid: _,
+                            ..
                         } => {
                             compare_arglist_paramlist(
                                 &mut mname.clone(),
@@ -606,8 +681,7 @@ impl ASTExprType {
                     name: _,
                     ret_type: _,
                     paramlist,
-                    flabel: _,
-                    fid: _,
+                    ..
                 }) = c.symbol_table.table.get(fname)
                 {
                     let mut fname = fname.clone();
@@ -652,7 +726,7 @@ impl ASTExprType {
                             name: _,
                             vartype: _,
                             varid,
-                            varindices: _,
+                            ..
                         } => varid,
                         CSymbol::Func {
                             name: _,
@@ -786,11 +860,7 @@ impl VarNode {
         let gst = GLOBALSYMBOLTABLE.lock().unwrap();
         if let Some(entry) = gst.get(&self.varname) {
             match entry {
-                GSymbol::Func {
-                    ret_type: _,
-                    paramlist: _,
-                    flabel: _,
-                } => {
+                GSymbol::Func { .. } => {
                     //exit if a function with similar name exists
                     exit_on_err(
                         "Parameter Symbol ".to_owned()
@@ -798,11 +868,7 @@ impl VarNode {
                             + " is already declared as a function",
                     );
                 }
-                GSymbol::Var {
-                    vartype: _,
-                    varid: _,
-                    varindices: _,
-                } => {
+                GSymbol::Var { .. } => {
                     //Shadow global variable after warning user
                     log::warn!(
                         "Parameter Symbol {} is already declared as a variable in global scope",
@@ -892,6 +958,14 @@ pub fn install_func_to_gst(
     let mut gst = GLOBALSYMBOLTABLE.lock().unwrap();
     let mut label_count = LABEL_COUNT.lock().unwrap();
     //check if this is already  used
+    if returntype.get_base_type().is_class() {
+        exit_on_err("Classes are not allowed as return types.".to_owned());
+    }
+    for param in paramlist {
+        if param.vartype.get_base_type().is_class() {
+            exit_on_err("Classes are not allowed as return types.".to_owned());
+        }
+    }
     if TYPE_TABLE.lock().unwrap().tt_exists(&funcname) == true {
         exit_on_err(
             "Name [".to_owned()
@@ -1015,39 +1089,6 @@ pub fn parse_usize(s: &str) -> Result<usize, ()> {
 }
 pub fn parse_string(s: &str) -> Result<String, ()> {
     Ok(s.to_owned())
-}
-/*
- * Meta function
- * Get the type of a Global Symbol
- */
-pub fn __get_gsymbol_type(g: &GSymbol) -> &ASTExprType {
-    let vartype = match g {
-        GSymbol::Func {
-            ret_type,
-            paramlist: _,
-            flabel: _,
-        } => ret_type,
-        GSymbol::Var {
-            vartype,
-            varid: _,
-            varindices: _,
-        } => vartype,
-    };
-    return vartype;
-}
-/*
- * Meta function
- * Get the type of a local symbol
- */
-pub fn __get_lsymbol_type(l: &LSymbol) -> &ASTExprType {
-    let vartype = match l {
-        LSymbol::Var {
-            vartype,
-            varid: _,
-            varindices: _,
-        } => vartype,
-    };
-    return vartype;
 }
 /*
  * Function to insert parameter list to local symbol table
